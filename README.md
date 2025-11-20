@@ -80,6 +80,26 @@ Busca `ANON_KEY` y `SERVICE_ROLE_KEY`.
 
 Si algo no funciona o tus dominios dan error, ejecuta estos comandos en tu servidor para diagnosticar:
 
+### 0. Error 404 Page Not Found
+Si ves un "404 page not found" al acceder a tu dominio o IP:
+
+**Verifica que los contenedores estén corriendo:**
+```bash
+docker ps
+```
+
+**Si Traefik está corriendo pero da 404, revisa sus logs:**
+```bash
+docker logs traefik
+```
+
+**Prueba acceder directamente a Kong (API Gateway) sin pasar por Traefik:**
+```bash
+curl -I http://localhost:8000
+```
+
+Si esto responde bien pero tu dominio no, el problema es de DNS o configuración de Traefik.
+
 ### 1. Verificar que los contenedores están corriendo
 ```bash
 docker ps
@@ -107,3 +127,43 @@ cd /opt/supabase/docker
 docker compose down
 docker compose up -d
 ```
+
+## Usando Cloudflare con Proxy (Rayito Naranja) 🟠
+
+Si usas Cloudflare con el proxy activado (rayito naranja), **debes cambiar el modo de validación SSL** de Traefik.
+
+El problema es que Cloudflare hace que Let's Encrypt no pueda validar tu dominio directamente (el "TLS Challenge" falla). La solución es usar el **HTTP Challenge** en lugar del TLS Challenge.
+
+### Configuración para Cloudflare
+
+Después de instalar, entra a tu servidor y modifica el archivo de configuración:
+
+```bash
+cd /opt/supabase/docker
+nano docker-compose.override.yml
+```
+
+Busca la línea:
+```yaml
+- "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+```
+
+Y reemplázala por:
+```yaml
+- "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+- "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+```
+
+Guarda (Ctrl+O, Enter, Ctrl+X) y reinicia:
+```bash
+docker compose down
+docker compose up -d
+```
+
+### Configuración SSL en Cloudflare
+
+En el panel de Cloudflare, ve a **SSL/TLS** → **Overview** y selecciona:
+- **"Full (strict)"** si Traefik generó los certificados correctamente.
+- **"Full"** si tienes problemas (menos seguro pero funciona).
+
+**Nunca uses "Flexible"** o tendrás loops infinitos.
