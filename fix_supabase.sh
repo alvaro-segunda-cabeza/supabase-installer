@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Colores para output
+# Colores
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${CYAN}=== Reparando configuración de Supabase ===${NC}"
+echo -e "${CYAN}=== Script de corrección de Supabase ===${NC}"
 echo ""
 
 if [ "$EUID" -ne 0 ]; then 
@@ -17,129 +17,132 @@ fi
 
 cd /opt/supabase || exit 1
 
-echo -e "${YELLOW}[1/4] Deteniendo contenedores...${NC}"
+echo -e "${YELLOW}[1/5] Deteniendo contenedores...${NC}"
 docker compose down > /dev/null 2>&1
 echo -e "${GREEN}✓ Contenedores detenidos${NC}"
 echo ""
 
-echo -e "${YELLOW}[2/4] Corrigiendo docker-compose.yml...${NC}"
-# Corregir el problema del docker socket duplicado
-sed -i 's|/var/run/docker.sock/var/run/docker.sock|/var/run/docker.sock|g' docker-compose.yml
-sed -i 's|:/var/run/docker.sock:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
-sed -i 's|:\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
+echo -e "${YELLOW}[2/5] Agregando variables S3 faltantes al .env...${NC}"
+
+# Verificar si las variables ya existen, si no, agregarlas
+if ! grep -q "^REGION=" .env; then
+    echo "REGION=us-east-1" >> .env
+    echo -e "${GREEN}  + REGION agregada${NC}"
+fi
+
+if ! grep -q "^GLOBAL_S3_BUCKET=" .env; then
+    echo "GLOBAL_S3_BUCKET=supabase-storage" >> .env
+    echo -e "${GREEN}  + GLOBAL_S3_BUCKET agregada${NC}"
+fi
+
+if ! grep -q "^TENANT_ID=" .env; then
+    echo "TENANT_ID=stub" >> .env
+    echo -e "${GREEN}  + TENANT_ID agregada${NC}"
+fi
+
+if ! grep -q "^S3_PROTOCOL_PREFIX=" .env; then
+    echo "S3_PROTOCOL_PREFIX=http" >> .env
+    echo -e "${GREEN}  + S3_PROTOCOL_PREFIX agregada${NC}"
+fi
+
+if ! grep -q "^S3_PROTOCOL_ACCESS_KEY_ID=" .env; then
+    echo "S3_PROTOCOL_ACCESS_KEY_ID=stub" >> .env
+    echo -e "${GREEN}  + S3_PROTOCOL_ACCESS_KEY_ID agregada${NC}"
+fi
+
+if ! grep -q "^S3_PROTOCOL_ACCESS_KEY_SECRET=" .env; then
+    echo "S3_PROTOCOL_ACCESS_KEY_SECRET=stub" >> .env
+    echo -e "${GREEN}  + S3_PROTOCOL_ACCESS_KEY_SECRET agregada${NC}"
+fi
+
+echo -e "${GREEN}✓ Variables S3 configuradas${NC}"
+echo ""
+
+echo -e "${YELLOW}[3/5] Corrigiendo docker-compose.yml (problema del Docker socket)...${NC}"
+
+# Buscar y corregir todas las ocurrencias del Docker socket duplicado
+if grep -q "/var/run/docker.sock/var/run/docker.sock" docker-compose.yml; then
+    sed -i 's|/var/run/docker.sock/var/run/docker.sock|/var/run/docker.sock|g' docker-compose.yml
+    echo -e "${GREEN}  ✓ Corregido socket duplicado${NC}"
+fi
+
+# Corregir formato incorrecto del volumen
+if grep -q ":\${DOCKER_SOCKET_LOCATION" docker-compose.yml; then
+    sed -i 's|:\${DOCKER_SOCKET_LOCATION[^}]*}:/var/run/docker.sock:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
+    echo -e "${GREEN}  ✓ Corregido formato de variable DOCKER_SOCKET_LOCATION${NC}"
+fi
+
+# Buscar líneas que empiecen con ":" en volumes (error común)
+if grep -q "^[[:space:]]*- :/var/run/docker.sock" docker-compose.yml; then
+    sed -i 's|^[[:space:]]*- :/var/run/docker.sock.*|      - /var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
+    echo -e "${GREEN}  ✓ Corregido volumen con ':' al inicio${NC}"
+fi
+
 echo -e "${GREEN}✓ docker-compose.yml corregido${NC}"
 echo ""
 
-echo -e "${YELLOW}[3/4] Verificando docker-compose.override.yml...${NC}"
-if grep -q "traefik:v2" docker-compose.override.yml 2>/dev/null; then
-    echo -e "${YELLOW}Actualizando Traefik a v3.1...${NC}"
-    sed -i 's|traefik:v2.*|traefik:v3.1|g' docker-compose.override.yml
+echo -e "${YELLOW}[4/5] Verificando corrección del Docker socket...${NC}"
+SOCKET_ERRORS=$(grep -n "/var/run/docker.sock" docker-compose.yml | grep -E ":/var/run|/var/run.*:" | wc -l)
+if [ "$SOCKET_ERRORS" -eq 0 ]; then
+    echo -e "${GREEN}✓ No se encontraron más problemas con el socket${NC}"
+else
+    echo -e "${YELLOW}⚠ Se encontraron $SOCKET_ERRORS posibles problemas. Mostrando líneas:${NC}"
+    grep -n "/var/run/docker.sock" docker-compose.yml | grep -E ":/var/run|/var/run.*:"
 fi
-echo -e "${GREEN}✓ Traefik actualizado${NC}"
 echo ""
 
-echo -e "${YELLOW}[4/4] Iniciando servicios...${NC}"
+echo -e "${YELLOW}[5/5] Iniciando servicios...${NC}"
 docker compose up -d
 echo -e "${GREEN}✓ Servicios iniciados${NC}"
 echo ""
 
-echo -e "${CYAN}Esperando 30 segundos a que los servicios arranquen...${NC}"
-sleep 30
+echo -e "${CYAN}Esperando 45 segundos a que los servicios arranquen completamente...${NC}"
+sleep 45
 
 echo ""
 echo -e "${GREEN}=== Estado de los contenedores ===${NC}"
 docker compose ps
 echo ""
 
-echo -e "${CYAN}Si todo está OK, verificá con:${NC}"
-echo -e "  ${GREEN}bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/check_supabase.sh)${NC}"
+echo -e "${CYAN}=== Verificando servicios críticos ===${NC}"
 echo ""
 
-# 1. Agregar variables faltantes de S3 al .env
-echo -e "${CYAN}1. Agregando variables faltantes al .env...${NC}"
-
-# Verificar si las variables ya existen, si no, agregarlas
-if ! grep -q "GLOBAL_S3_BUCKET=" .env; then
-    echo "GLOBAL_S3_BUCKET=supabase-storage" >> .env
-fi
-
-if ! grep -q "REGION=" .env; then
-    echo "REGION=us-east-1" >> .env
-fi
-
-if ! grep -q "TENANT_ID=" .env; then
-    echo "TENANT_ID=stub" >> .env
-fi
-
-if ! grep -q "S3_PROTOCOL_PREFIX=" .env; then
-    echo "S3_PROTOCOL_PREFIX=http" >> .env
-fi
-
-if ! grep -q "S3_PROTOCOL_ACCESS_KEY_ID=" .env; then
-    echo "S3_PROTOCOL_ACCESS_KEY_ID=stub" >> .env
-fi
-
-if ! grep -q "S3_PROTOCOL_ACCESS_KEY_SECRET=" .env; then
-    echo "S3_PROTOCOL_ACCESS_KEY_SECRET=stub" >> .env
-fi
-
-echo -e "${GREEN}✓ Variables agregadas al .env${NC}"
-echo ""
-
-# 2. Mostrar los logs de Storage antes de reiniciar
-echo -e "${CYAN}2. Mostrando últimos logs de Storage (antes de reiniciar):${NC}"
-docker compose logs storage --tail=30
-echo ""
-
-# 3. Reiniciar servicios problemáticos
-echo -e "${CYAN}3. Reiniciando servicios...${NC}"
-docker compose restart storage
-sleep 5
-docker compose restart realtime
-sleep 5
-
-echo -e "${GREEN}✓ Servicios reiniciados${NC}"
-echo ""
-
-# 4. Esperar a que los servicios se estabilicen
-echo -e "${CYAN}4. Esperando que los servicios se estabilicen (30 segundos)...${NC}"
-sleep 30
-
-# 5. Verificar estado después del reinicio
-echo -e "${CYAN}5. Verificando estado de los servicios:${NC}"
-docker compose ps
-
-echo ""
-echo -e "${CYAN}6. Verificando Storage específicamente:${NC}"
+# Verificar Storage
 STORAGE_STATUS=$(docker ps --filter "name=supabase-storage" --format "{{.Status}}")
 if echo "$STORAGE_STATUS" | grep -q "Up"; then
-    echo -e "${GREEN}✓ Storage está corriendo correctamente${NC}"
+    echo -e "${GREEN}✓ Storage está corriendo${NC}"
 else
-    echo -e "${RED}✗ Storage todavía tiene problemas${NC}"
-    echo -e "${YELLOW}Logs actuales de Storage:${NC}"
-    docker compose logs storage --tail=30
+    echo -e "${RED}✗ Storage tiene problemas:${NC}"
+    docker compose logs storage --tail=20
 fi
 
-echo ""
-echo -e "${CYAN}7. Verificando Realtime:${NC}"
-REALTIME_STATUS=$(docker ps --filter "name=supabase-realtime" --format "{{.Status}}")
-if echo "$REALTIME_STATUS" | grep -q "healthy"; then
-    echo -e "${GREEN}✓ Realtime está saludable${NC}"
-elif echo "$REALTIME_STATUS" | grep -q "Up"; then
-    echo -e "${YELLOW}⚠ Realtime está corriendo pero aún no pasa health check${NC}"
+# Verificar Edge Functions
+FUNCTIONS_STATUS=$(docker ps --filter "name=supabase-edge-functions" --format "{{.Status}}")
+if echo "$FUNCTIONS_STATUS" | grep -q "Up"; then
+    echo -e "${GREEN}✓ Edge Functions está corriendo${NC}"
 else
-    echo -e "${RED}✗ Realtime tiene problemas${NC}"
+    echo -e "${RED}✗ Edge Functions tiene problemas${NC}"
 fi
 
 echo ""
 echo -e "${CYAN}=== Resumen ===${NC}"
 echo ""
-STORAGE_RUNNING=$(docker ps --filter "name=supabase-storage" --format "{{.Names}}" 2>/dev/null)
-if [ -n "$STORAGE_RUNNING" ]; then
-    echo -e "${GREEN}✓ Storage corregido y funcionando${NC}"
-    echo -e "${GREEN}✓ Ahora podés acceder a Studio sin el error de 'count'${NC}"
+
+STORAGE_OK=$(docker ps --filter "name=supabase-storage" --filter "status=running" --format "{{.Names}}" 2>/dev/null)
+FUNCTIONS_OK=$(docker ps --filter "name=supabase-edge-functions" --filter "status=running" --format "{{.Names}}" 2>/dev/null)
+
+if [ -n "$STORAGE_OK" ] && [ -n "$FUNCTIONS_OK" ]; then
+    echo -e "${GREEN}✅ ¡Supabase corregido exitosamente!${NC}"
+    echo -e "${GREEN}✓ Storage funcionando${NC}"
+    echo -e "${GREEN}✓ Edge Functions funcionando${NC}"
+    echo ""
+    echo -e "${CYAN}Ahora podés acceder a Studio sin errores.${NC}"
 else
-    echo -e "${RED}✗ Storage todavía tiene problemas. Ejecutá este comando para ver los logs:${NC}"
-    echo -e "   ${YELLOW}cd /opt/supabase && docker compose logs storage --tail=50${NC}"
+    echo -e "${YELLOW}⚠ Algunos servicios todavía tienen problemas:${NC}"
+    [ -z "$STORAGE_OK" ] && echo -e "  ${RED}✗ Storage${NC}"
+    [ -z "$FUNCTIONS_OK" ] && echo -e "  ${RED}✗ Edge Functions${NC}"
+    echo ""
+    echo -e "${YELLOW}Ejecutá este comando para más detalles:${NC}"
+    echo -e "  ${CYAN}cd /opt/supabase && docker compose logs storage functions --tail=50${NC}"
 fi
 echo ""
