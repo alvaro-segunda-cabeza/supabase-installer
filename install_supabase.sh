@@ -23,8 +23,8 @@ if [ -d "/opt/supabase" ]; then
     cd /
 fi
 
-docker ps -a | grep -E "supabase|traefik|postgres|kong" | awk '{print $1}' | xargs -r docker stop 2>/dev/null || true
-docker ps -a | grep -E "supabase|traefik|postgres|kong" | awk '{print $1}' | xargs -r docker rm 2>/dev/null || true
+docker ps -a | grep -E "supabase|nginx|postgres|kong" | awk '{print $1}' | xargs -r docker stop 2>/dev/null || true
+docker ps -a | grep -E "supabase|nginx|postgres|kong" | awk '{print $1}' | xargs -r docker rm 2>/dev/null || true
 docker volume ls | grep supabase | awk '{print $2}' | xargs -r docker volume rm 2>/dev/null || true
 
 if [ -d "/opt/supabase" ]; then
@@ -69,8 +69,9 @@ INSTALL_DIR="/opt/supabase"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# 5. Descargar configuración de Supabase desde GitHub
-git clone --depth 1 https://github.com/supabase/supabase.git temp_repo > /dev/null 2>&1
+# 5. Descargar configuración probada y funcional
+echo -e "${CYAN}Descargando configuración de Supabase...${NC}"
+git clone --depth 1 https://github.com/singh-inder/supabase-automated-self-host.git temp_repo > /dev/null 2>&1
 
 if [ -d "temp_repo/docker" ]; then
     cp -r temp_repo/docker/* .
@@ -99,7 +100,12 @@ SECRET_KEY_BASE=$(generate_secret)
 
 BASIC_AUTH_HASH=$(echo "$DASHBOARD_PASSWORD" | htpasswd -ni $DASHBOARD_USERNAME 2>/dev/null | sed 's/\$/\$\$/g')
 
-# 7. Crear archivo .env completo
+# 7. Crear archivo .env desde el ejemplo
+if [ -f ".env.example" ]; then
+    cp .env.example .env
+fi
+
+# Reemplazar valores en el .env
 cat > .env <<ENVFILE
 # Secrets
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
@@ -122,11 +128,11 @@ KONG_HTTPS_PORT=8443
 PGRST_DB_SCHEMAS=public,storage,graphql_public
 
 # Auth
-SITE_URL=https://studio.$DOMAIN
+SITE_URL=http://studio.$DOMAIN
 ADDITIONAL_REDIRECT_URLS=
 JWT_EXPIRY=3600
 DISABLE_SIGNUP=false
-API_EXTERNAL_URL=https://api.$DOMAIN
+API_EXTERNAL_URL=http://api.$DOMAIN
 
 MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
 MAILER_URLPATHS_INVITE=/auth/v1/verify
@@ -150,7 +156,7 @@ ENABLE_PHONE_AUTOCONFIRM=true
 # Studio
 STUDIO_DEFAULT_ORGANIZATION=Default Organization
 STUDIO_DEFAULT_PROJECT=Default Project
-SUPABASE_PUBLIC_URL=https://api.$DOMAIN
+SUPABASE_PUBLIC_URL=http://api.$DOMAIN
 
 # Functions
 FUNCTIONS_VERIFY_JWT=false
@@ -169,7 +175,7 @@ POOLER_DB_POOL_SIZE=10
 # Storage
 IMGPROXY_ENABLE_WEBP_DETECTION=true
 
-# Edge Runtime
+# Edge Runtime - IMPORTANTE: Esta es la clave
 DOCKER_SOCKET_LOCATION=/var/run/docker.sock
 
 # Vault
@@ -192,8 +198,8 @@ Anon Key: $ANON_KEY
 Service Role Key: $SERVICE_KEY
 Dashboard User: $DASHBOARD_USERNAME
 Dashboard Pass: $DASHBOARD_PASSWORD
-Dashboard URL: https://studio.$DOMAIN
-API URL: https://api.$DOMAIN
+Dashboard URL: http://studio.$DOMAIN
+API URL: http://api.$DOMAIN
 =================================
 CREDS
 
@@ -201,43 +207,7 @@ sleep 30
 echo -e "${CYAN}Bueno no, no era así. Pero igual la instalación viene joya. Faltan unos 3 o 4 minutos, dependiendo cuánto hayas puesto en este servidor.${NC}"
 echo ""
 
-# 8. Corregir COMPLETAMENTE docker-compose.yml - TODAS las variantes del error
-if [ -f "docker-compose.yml" ]; then
-    echo -e "${CYAN}Corrigiendo configuración de Docker...${NC}"
-    
-    # Backup del original
-    cp docker-compose.yml docker-compose.yml.backup
-    
-    # Método 1: Reemplazos directos de paths incorrectos
-    sed -i 's|/var/run/docker.sock/var/run/docker.sock|/var/run/docker.sock|g' docker-compose.yml
-    sed -i 's|:/var/run/docker.sock:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
-    sed -i 's|:\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:ro,z|\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro|g' docker-compose.yml
-    sed -i 's|:\${DOCKER_SOCKET_LOCATION}:ro,z|\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro|g' docker-compose.yml
-    
-    # Método 2: Buscar CUALQUIER línea de volumen que empiece con : o ${ sin path correcto
-    sed -i '/volumes:/,/^[^ ]/ {
-        s|^[[:space:]]*- :[^:]*:\(/var/run/docker.sock.*\)|      - /var/run/docker.sock:\1|g
-        s|^[[:space:]]*- \${DOCKER_SOCKET[^}]*}:\(/var/run/docker.sock.*\)|      - /var/run/docker.sock:\1|g
-    }' docker-compose.yml
-    
-    # Método 3: Forzar corrección en el servicio vector específicamente
-    # Buscar la sección de vector y corregir sus volúmenes
-    awk '
-    /^  vector:/ { in_vector=1 }
-    in_vector && /^  [a-z]/ && !/^  vector/ { in_vector=0 }
-    in_vector && /volumes:/ { in_volumes=1; print; next }
-    in_volumes && /^  [a-z]/ && !/^    / { in_volumes=0 }
-    in_volumes && /docker\.sock/ {
-        print "      - /var/run/docker.sock:/var/run/docker.sock:ro"
-        next
-    }
-    { print }
-    ' docker-compose.yml > docker-compose.yml.tmp && mv docker-compose.yml.tmp docker-compose.yml
-    
-    echo -e "${GREEN}✓ Configuración corregida${NC}"
-fi
-
-# 9. Crear docker-compose.override.yml con Nginx (sin SSL por ahora)
+# 8. Crear docker-compose.override.yml con Nginx (sin SSL)
 cat > docker-compose.override.yml << 'OVERRIDE_EOF'
 services:
   nginx:
@@ -367,25 +337,15 @@ NGINX_CONF
 # Crear archivo .htpasswd para autenticación básica
 echo "$BASIC_AUTH_HASH" | sed 's/\$\$/\$/g' > nginx/conf.d/.htpasswd
 
-mkdir -p volumes/logs
-
-# 10. Iniciar servicios con force-recreate
+# 9. Iniciar servicios
 echo -e "${CYAN}Iniciando todos los servicios...${NC}"
-docker compose up -d --force-recreate 2>&1 | tee /tmp/docker-compose-up.log
-
-# Verificar si hubo errores en el inicio
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Error al iniciar los servicios.${NC}"
-    echo -e "${YELLOW}Revisa el log completo:${NC}"
-    cat /tmp/docker-compose-up.log
-    exit 1
-fi
+docker compose up -d 2>&1 | tee /tmp/docker-compose-up.log
 
 sleep 60
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
-# 11. Verificar que los servicios estén corriendo
+# 10. Verificar que los servicios estén corriendo
 echo -e "${CYAN}Verificando servicios...${NC}"
 sleep 30
 
@@ -404,36 +364,14 @@ if [ -z "$NGINX_RUNNING" ] || [ -z "$DB_RUNNING" ] || [ -z "$STUDIO_RUNNING" ] |
     echo -e "${YELLOW}Logs de los servicios que fallaron:${NC}"
     echo ""
     
-    # Mostrar logs de servicios que no están corriendo
-    if [ -z "$NGINX_RUNNING" ]; then
-        echo -e "${RED}=== Logs de Nginx ===${NC}"
-        docker compose logs nginx --tail=30
-        echo ""
-    fi
+    # Mostrar logs específicos
+    [ -z "$NGINX_RUNNING" ] && echo -e "${RED}=== Logs de Nginx ===${NC}" && docker compose logs nginx --tail=30
+    [ -z "$DB_RUNNING" ] && echo -e "${RED}=== Logs de Database ===${NC}" && docker compose logs db --tail=30
+    [ -z "$STUDIO_RUNNING" ] && echo -e "${RED}=== Logs de Studio ===${NC}" && docker compose logs studio --tail=30
+    [ -z "$KONG_RUNNING" ] && echo -e "${RED}=== Logs de Kong ===${NC}" && docker compose logs kong --tail=30
     
-    if [ -z "$DB_RUNNING" ]; then
-        echo -e "${RED}=== Logs de Database ===${NC}"
-        docker compose logs db --tail=30
-        echo ""
-    fi
-    
-    if [ -z "$STUDIO_RUNNING" ]; then
-        echo -e "${RED}=== Logs de Studio ===${NC}"
-        docker compose logs studio --tail=30
-        echo ""
-    fi
-    
-    if [ -z "$KONG_RUNNING" ]; then
-        echo -e "${RED}=== Logs de Kong ===${NC}"
-        docker compose logs kong --tail=30
-        echo ""
-    fi
-    
+    echo ""
     echo -e "${RED}Hubo un problema. Revisá los logs arriba.${NC}"
-    echo -e "${YELLOW}Podés intentar:${NC}"
-    echo -e "  1. Ver configuración: ${GREEN}cd /opt/supabase && docker compose config${NC}"
-    echo -e "  2. Reiniciar todo:    ${GREEN}cd /opt/supabase && docker compose down && docker compose up -d${NC}"
-    echo -e "  3. Ver logs live:     ${GREEN}cd /opt/supabase && docker compose logs -f${NC}"
     exit 1
 fi
 
@@ -467,8 +405,6 @@ echo ""
 echo -e "${CYAN}Configurá el DNS en Cloudflare:${NC}"
 echo -e "  1. Agregá registro A: ${GREEN}studio.$DOMAIN${NC} → $SERVER_IP (Proxy ${RED}OFF${NC})"
 echo -e "  2. Agregá registro A: ${GREEN}api.$DOMAIN${NC} → $SERVER_IP (Proxy ${RED}OFF${NC})"
-echo -e "  3. SSL/TLS modo: ${GREEN}Flexible${NC} (o desactivá el proxy de Cloudflare)"
 echo ""
 echo -e "${YELLOW}Nota: Esta instalación usa HTTP sin SSL por simplicidad.${NC}"
-echo -e "${YELLOW}Para producción, configurá SSL manualmente después.${NC}"
 echo ""
