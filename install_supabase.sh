@@ -61,9 +61,8 @@ if [ -d "$INSTALL_DIR" ]; then
     echo -e "${BLUE}  ✓ Cleaned up old installation${NC}"
 fi
 
-echo -e "${BLUE}  Cloning Supabase repository (this may take 1-2 minutes)...${NC}"
-git clone --depth 1 --progress https://github.com/supabase/supabase "$INSTALL_DIR" 2>&1 | \
-    grep -E "Receiving|Resolving" | tail -5 || true
+echo -e "${BLUE}  Cloning repository (please wait 1-2 minutes)...${NC}"
+git clone --depth 1 --quiet https://github.com/supabase/supabase "$INSTALL_DIR"
 echo -e "${BLUE}  ✓ Download complete${NC}"
 
 # 4. Generate Secrets
