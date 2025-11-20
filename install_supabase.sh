@@ -1,211 +1,360 @@
 #!/bin/bash
+set -euo pipefail
 
-# Supabase Self-Hosting Installer Script
-# Simple, secure, and Cloudflare-ready
+###
+# Instalador automatizado de Supabase + Traefik (Ubuntu/Debian)
+# Modo: Express (todo automático) o Guiado (máx 3 preguntas)
+###
 
-set -e
-
-# Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Function to generate JWT (HS256) using openssl
-generate_jwt() {
-    local payload=$1
-    local secret=$2
-    
-    local header='{"alg":"HS256","typ":"JWT"}'
-    local header_b64=$(echo -n "$header" | openssl base64 -e -A | sed s/\+/-/g | sed s/\//_/g | sed -E s/=+$//)
-    local payload_b64=$(echo -n "$payload" | openssl base64 -e -A | sed s/\+/-/g | sed s/\//_/g | sed -E s/=+$//)
-    local signature=$(echo -n "${header_b64}.${payload_b64}" | openssl dgst -sha256 -hmac "$secret" -binary | openssl base64 -e -A | sed s/\+/-/g | sed s/\//_/g | sed -E s/=+$//)
-    
-    echo "${header_b64}.${payload_b64}.${signature}"
-}
-
-echo -e "${BLUE}=== Supabase Installer ===${NC}"
-echo ""
-
-# Check root
-if [ "$EUID" -ne 0 ]; then 
-  echo -e "${RED}Error: Run as root (use sudo)${NC}"
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "[ERROR] Este script debe ejecutarse como root (o con sudo)." >&2
   exit 1
 fi
 
-# Move to a safe directory first
-cd /root 2>/dev/null || cd /tmp
-
-# 1. Update & Install Dependencies
-echo -e "${GREEN}[1/6] Updating system...${NC}"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq curl git openssl
-
-# 2. Install Docker
-echo -e "${GREEN}[2/6] Installing Docker...${NC}"
-if ! command -v docker &> /dev/null; then
-    curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
-    systemctl enable docker > /dev/null 2>&1
-    systemctl start docker > /dev/null 2>&1
+OS_ID="$(. /etc/os-release && echo "$ID")"
+if [[ "$OS_ID" != "ubuntu" && "$OS_ID" != "debian" ]]; then
+  echo "[ERROR] Este instalador está pensado para Ubuntu/Debian. OS detectado: $OS_ID" >&2
+  exit 1
 fi
 
-# 3. Clone Supabase
-echo -e "${GREEN}[3/6] Downloading Supabase...${NC}"
-INSTALL_DIR="/opt/supabase"
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${YELLOW}Removing existing installation...${NC}"
-    # Force kill any stuck containers first
-    docker ps -a | grep -E "supabase|traefik|kong" | awk '{print $1}' | xargs -r docker rm -f 2>/dev/null || true
-    cd "$INSTALL_DIR/docker" 2>/dev/null && timeout 30 docker compose down 2>/dev/null || true
-    cd /root
-    rm -rf "$INSTALL_DIR"
-    echo -e "${BLUE}  ✓ Cleaned up old installation${NC}"
-fi
-
-echo -e "${BLUE}  Cloning repository (please wait 1-2 minutes)...${NC}"
-git clone --depth 1 --quiet https://github.com/supabase/supabase "$INSTALL_DIR"
-echo -e "${BLUE}  ✓ Download complete${NC}"
-
-# 4. Generate Secrets
-echo -e "${GREEN}[4/6] Generating secure keys...${NC}"
-cd "$INSTALL_DIR/docker"
-cp .env.example .env
-
-DB_PASSWORD=$(openssl rand -base64 12)
-JWT_SECRET=$(openssl rand -hex 32)
-
-IAT=$(date +%s)
-EXP=$((IAT + 315360000))
-
-ANON_PAYLOAD="{\"role\":\"anon\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
-ANON_KEY=$(generate_jwt "$ANON_PAYLOAD" "$JWT_SECRET")
-
-SERVICE_PAYLOAD="{\"role\":\"service_role\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
-SERVICE_KEY=$(generate_jwt "$SERVICE_PAYLOAD" "$JWT_SECRET")
-
-# Update .env using a safer method with perl instead of sed
-export DB_PASSWORD JWT_SECRET ANON_KEY SERVICE_KEY
-perl -i -pe "s/POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=\Q$ENV{DB_PASSWORD}\E/" .env
-perl -i -pe "s/JWT_SECRET=.*/JWT_SECRET=\Q$ENV{JWT_SECRET}\E/" .env
-perl -i -pe "s/ANON_KEY=.*/ANON_KEY=\Q$ENV{ANON_KEY}\E/" .env
-perl -i -pe "s/SERVICE_ROLE_KEY=.*/SERVICE_ROLE_KEY=\Q$ENV{SERVICE_KEY}\E/" .env
-
-echo -e "${BLUE}  ✓ Keys generated${NC}"
-
-# Ask for SSL
+clear || true
+echo "=== Instalador Supabase + Traefik ==="
 echo ""
-read -p "Configure SSL with domain? (y/n): " SETUP_SSL
+echo "Elige el modo de instalación:"
+echo "  1) Express  - todo automático con valores por defecto"
+echo "  2) Guiado   - te preguntaré solo 3 cosas"
+echo ""
+read -rp "Opción [1/2]: " INSTALL_MODE
 
-if [[ "$SETUP_SSL" =~ ^[Yy]$ ]]; then
-    read -p "Domain (e.g., example.com): " DOMAIN
-    read -p "Email: " EMAIL
-    
-    if [ ! -z "$DOMAIN" ] && [ ! -z "$EMAIL" ]; then
-        echo -e "${GREEN}[5/6] Configuring SSL...${NC}"
-        
-        # Create Traefik config with latest version (v3.x) - Cloudflare compatible
-        cat <<EOF > docker-compose.override.yml
+case "${INSTALL_MODE:-1}" in
+  1|"" )
+    MODE="express"
+    ;;
+  2)
+    MODE="guiado"
+    ;;
+  *)
+    echo "Opción no válida, usando modo Express por defecto."
+    MODE="express"
+    ;;
+esac
+
+SUPABASE_DOMAIN=""
+LE_EMAIL=""
+STACK_TYPE="full"  # full | minimal
+
+if [[ "$MODE" == "express" ]]; then
+  echo "\n[Modo EXPRESS] Instalación automática."
+  echo "Se usará configuración por defecto y se pedirá solo el dominio."
+  read -rp "Dominio para Supabase Studio (ej: supabase.midominio.com): " SUPABASE_DOMAIN
+  if [[ -z "$SUPABASE_DOMAIN" ]]; then
+    echo "[ERROR] Debes indicar un dominio." >&2
+    exit 1
+  fi
+  # Valores por defecto razonables
+  LE_EMAIL="admin@${SUPABASE_DOMAIN#*.}"
+  STACK_TYPE="full"
+else
+  echo "\n[Modo GUIADO] Te preguntaré 3 cosas como máximo."
+  # 1) Dominio
+  read -rp "1/3 - Dominio para Supabase Studio (ej: supabase.midominio.com): " SUPABASE_DOMAIN
+  if [[ -z "$SUPABASE_DOMAIN" ]]; then
+    echo "[ERROR] Debes indicar un dominio." >&2
+    exit 1
+  fi
+  # 2) Email
+  read -rp "2/3 - Email para Let's Encrypt (certificados SSL): " LE_EMAIL
+  if [[ -z "$LE_EMAIL" ]]; then
+    echo "[ERROR] Debes indicar un email válido." >&2
+    exit 1
+  fi
+  # 3) Tipo de stack
+  echo "3/3 - ¿Qué quieres instalar?"
+  echo "     1) Stack completo de Supabase (recomendado)"
+  echo "     2) Solo Traefik + Studio (mínimo)"
+  read -rp "     Opción [1/2]: " STACK_OPT
+  case "${STACK_OPT:-1}" in
+    1|"" ) STACK_TYPE="full" ;;
+    2) STACK_TYPE="minimal" ;;
+    *) echo "Opción no válida, usando 'full'."; STACK_TYPE="full" ;;
+  esac
+fi
+
+# Si en guiado no se escribió LE_EMAIL, derivamos uno por defecto
+if [[ -z "$LE_EMAIL" ]]; then
+  LE_EMAIL="admin@${SUPABASE_DOMAIN#*.}"
+fi
+
+echo ""  
+echo "Resumen de instalación:"
+echo "  Dominio:        $SUPABASE_DOMAIN"
+echo "  Email LE:       $LE_EMAIL"
+echo "  Tipo de stack:  $STACK_TYPE"
+echo "  Modo:           $MODE"
+read -rp "¿Continuar? [s/N]: " CONFIRM
+if [[ ! "${CONFIRM:-n}" =~ ^[sS]$ ]]; then
+  echo "Cancelado por el usuario."
+  exit 0
+fi
+
+echo "=== Instalando dependencias (Docker, docker-compose-plugin, git) ==="
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl gnupg lsb-release git
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Instalando Docker Engine desde repositorio oficial..."
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+
+  echo \
+"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/\
+$OS_ID \
+\$(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
+
+  apt-get update -qq
+  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
+
+echo "=== Habilitando y arrancando Docker ==="
+systemctl enable docker
+systemctl start docker
+
+mkdir -p /opt/supabase-traefik
+cd /opt/supabase-traefik
+
+if [[ "$STACK_TYPE" == "minimal" ]]; then
+  cat > docker-compose.yml <<EOF
+version: "3.8"
+
 services:
   traefik:
-    image: traefik:latest
+    image: traefik:v3.1
     container_name: traefik
     command:
-      - "--log.level=INFO"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=${EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.email=$LE_EMAIL"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - "./letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
     restart: unless-stopped
 
   studio:
+    image: supabase/studio:latest
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: "supabase-anon-key"
+      SUPABASE_SERVICE_KEY: "supabase-service-role-key"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\`studio.${DOMAIN}\`)"
+      - "traefik.http.routers.studio.rule=Host(\"$SUPABASE_DOMAIN\")"
       - "traefik.http.routers.studio.entrypoints=websecure"
       - "traefik.http.routers.studio.tls=true"
       - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
-      - "traefik.http.services.studio.loadbalancer.server.port=3000"
+    depends_on:
+      - meta
+      - kong
+    restart: unless-stopped
+
+  meta:
+    image: supabase/postgres-meta:latest
+    environment:
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: postgres
+      PG_META_DB_NAME: postgres
+    depends_on:
+      - db
+    restart: unless-stopped
 
   kong:
+    image: supabase/kong:latest
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: supabase/postgres:15.1.0.140
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  db-data:
+EOF
+else
+  cat > docker-compose.yml <<EOF
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=$LE_EMAIL"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    restart: unless-stopped
+
+  db:
+    image: supabase/postgres:15.1.0.140
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  kong:
+    image: supabase/kong:latest
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+    depends_on:
+      - db
+      - auth
+      - rest
+      - realtime
+      - storage
+    restart: unless-stopped
+
+  auth:
+    image: supabase/gotrue:v2.151.0
+    environment:
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
+      GOTRUE_SITE_URL: https://$SUPABASE_DOMAIN
+      GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  rest:
+    image: supabase/postgrest:v12.0.1
+    environment:
+      PGRST_DB_URI: postgres://postgres:postgres@db:5432/postgres
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: anon
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  realtime:
+    image: supabase/realtime:v2.25.75
+    environment:
+      DB_HOST: db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: postgres
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  storage:
+    image: supabase/storage-api:v0.43.8
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  meta:
+    image: supabase/postgres-meta:latest
+    environment:
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: postgres
+      PG_META_DB_NAME: postgres
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  studio:
+    image: supabase/studio:latest
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: "supabase-anon-key"
+      SUPABASE_SERVICE_KEY: "supabase-service-role-key"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.kong.rule=Host(\`api.${DOMAIN}\`)"
-      - "traefik.http.routers.kong.entrypoints=websecure"
-      - "traefik.http.routers.kong.tls=true"
-      - "traefik.http.routers.kong.tls.certresolver=letsencrypt"
-      - "traefik.http.services.kong.loadbalancer.server.port=8000"
+      - "traefik.http.routers.studio.rule=Host(\"$SUPABASE_DOMAIN\")"
+      - "traefik.http.routers.studio.entrypoints=websecure"
+      - "traefik.http.routers.studio.tls=true"
+      - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
+    depends_on:
+      - meta
+      - kong
+    restart: unless-stopped
+
+volumes:
+  db-data:
 EOF
-        
-        sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.${DOMAIN}|" .env
-        sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.${DOMAIN}|" .env
-        
-        # Get IPv4 address specifically
-        SERVER_IPV4=$(curl -4 -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
-        
-        echo -e "${BLUE}✓ SSL configured for studio.${DOMAIN} and api.${DOMAIN}${NC}"
-        echo -e "${YELLOW}⚠ Make sure DNS records point to this server!${NC}"
-        echo -e "   studio.${DOMAIN} → A → ${SERVER_IPV4}"
-        echo -e "   api.${DOMAIN}    → A → ${SERVER_IPV4}"
-        echo ""
-        read -p "Press Enter when DNS is ready..."
-    else
-        echo -e "${YELLOW}Skipping SSL configuration${NC}"
-        SETUP_SSL="n"
-    fi
-else
-    echo -e "${GREEN}[5/6] Skipping SSL...${NC}"
 fi
 
-# 6. Start
-echo -e "${GREEN}[6/6] Starting services...${NC}"
-docker compose pull -q
-docker compose up -d
+mkdir -p letsencrypt
+chmod 700 letsencrypt
 
-# Wait for services
-echo -e "${BLUE}Waiting for services to start...${NC}"
-sleep 15
-
-echo ""
-echo -e "${GREEN}✓ Installation complete!${NC}"
-echo ""
-
-# Get server IP
-SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
-
-if [[ "$SETUP_SSL" =~ ^[Yy]$ ]] && [ ! -z "$DOMAIN" ]; then
-    echo -e "${BLUE}📍 Access URLs:${NC}"
-    echo -e "   Studio: ${GREEN}https://studio.${DOMAIN}${NC}"
-    echo -e "   API:    ${GREEN}https://api.${DOMAIN}${NC}"
-    echo ""
-    echo -e "${YELLOW}⏳ SSL certificates take 1-2 minutes to generate.${NC}"
-    echo -e "${YELLOW}   If you see 'not secure', wait and refresh.${NC}"
-    echo ""
-    echo -e "${BLUE}Cloudflare users: Set SSL/TLS mode to 'Full' (not Flexible)${NC}"
-else
-    echo -e "${BLUE}📍 Access URLs:${NC}"
-    echo -e "   Studio: ${GREEN}http://${SERVER_IP}:3000${NC}"
-    echo -e "   API:    ${GREEN}http://${SERVER_IP}:8000${NC}"
+echo "=== Arrancando Traefik + Supabase (parcial) ==="
+DOCKER_COMPOSE="docker compose"
+if ! $DOCKER_COMPOSE version >/dev/null 2>&1; then
+  DOCKER_COMPOSE="docker-compose"
 fi
 
+$DOCKER_COMPOSE up -d
+
+IP_PUBLICA="$(curl -s https://ifconfig.me || echo "TU_IP")"
+
 echo ""
-echo -e "${BLUE}🔑 Credentials:${NC} /opt/supabase/docker/.env"
+echo "==============================================="
+echo " Instalación básica completada"
+echo "==============================================="
+echo "Dominio configurado:   $SUPABASE_DOMAIN"
+echo "IP pública detectada:  $IP_PUBLICA"
 echo ""
-echo -e "${BLUE}📋 Useful commands:${NC}"
-echo -e "   Status:  ${GREEN}docker ps${NC}"
-echo -e "   Logs:    ${GREEN}cd /opt/supabase/docker && docker compose logs -f traefik${NC}"
-echo -e "   Restart: ${GREEN}cd /opt/supabase/docker && docker compose restart${NC}"
+echo "Asegúrate de que en Cloudflare tienes:" 
+echo "  - Un registro A apuntando $SUPABASE_DOMAIN -> $IP_PUBLICA"
+echo "  - Nube naranja ACTIVADA (proxy)"
 echo ""
+echo "Traefik está gestionando HTTP/HTTPS en este servidor."
+echo "Cuando la propagación DNS termine, prueba a entrar a:"
+echo "  https://$SUPABASE_DOMAIN"
+echo ""
+echo "IMPORTANTE:"
+echo "  - Este compose solo arranca Traefik + Studio + servicios mínimos."
+echo "  - Debes completar la configuración de Supabase (db, auth, storage, etc.)"
+echo "    según la documentación oficial y adaptar el docker-compose.yml."
+echo ""
+echo "Script finalizado."
