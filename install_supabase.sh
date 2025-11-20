@@ -58,8 +58,13 @@ if [ -d "$INSTALL_DIR" ]; then
     cd "$INSTALL_DIR/docker" 2>/dev/null && timeout 30 docker compose down 2>/dev/null || true
     cd /
     rm -rf "$INSTALL_DIR"
+    echo -e "${BLUE}  ✓ Cleaned up old installation${NC}"
 fi
-git clone --depth 1 https://github.com/supabase/supabase "$INSTALL_DIR" > /dev/null 2>&1
+
+echo -e "${BLUE}  Cloning Supabase repository (this may take 1-2 minutes)...${NC}"
+git clone --depth 1 --progress https://github.com/supabase/supabase "$INSTALL_DIR" 2>&1 | \
+    grep -E "Receiving|Resolving" | tail -5 || true
+echo -e "${BLUE}  ✓ Download complete${NC}"
 
 # 4. Generate Secrets
 echo -e "${GREEN}[4/6] Generating secure keys...${NC}"
