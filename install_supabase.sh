@@ -213,7 +213,7 @@ version: "3.8"
 
 services:
   traefik:
-    image: traefik:v2.10
+    image: traefik:v3.1
     container_name: traefik
     restart: unless-stopped
     command:
