@@ -290,7 +290,30 @@ sleep 60
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
-sleep 60
+# 11. Verificar que los servicios estén corriendo
+echo -e "${CYAN}Verificando servicios...${NC}"
+sleep 30
+
+# Verificar contenedores críticos
+TRAEFIK_RUNNING=$(docker ps --filter "name=traefik" --format "{{.Names}}" 2>/dev/null)
+DB_RUNNING=$(docker ps --filter "name=supabase-db" --format "{{.Names}}" 2>/dev/null)
+STUDIO_RUNNING=$(docker ps --filter "name=supabase-studio" --format "{{.Names}}" 2>/dev/null)
+KONG_RUNNING=$(docker ps --filter "name=supabase-kong" --format "{{.Names}}" 2>/dev/null)
+
+if [ -z "$TRAEFIK_RUNNING" ] || [ -z "$DB_RUNNING" ] || [ -z "$STUDIO_RUNNING" ] || [ -z "$KONG_RUNNING" ]; then
+    echo -e "${RED}Algunos servicios no iniciaron correctamente.${NC}"
+    echo -e "${YELLOW}Mostrando logs de los últimos servicios:${NC}"
+    echo ""
+    docker compose ps
+    echo ""
+    docker compose logs --tail=20
+    echo ""
+    echo -e "${RED}Hubo un problema. Revisá los logs arriba.${NC}"
+    echo -e "${YELLOW}Podés intentar reiniciar con: cd /opt/supabase && docker compose restart${NC}"
+    exit 1
+fi
+
+sleep 30
 
 echo -e "${CYAN}Listo, ponete a laburar.${NC}"
 echo ""
@@ -311,4 +334,7 @@ echo -e "${YELLOW}Configurá el DNS en Cloudflare:${NC}"
 echo -e "  1. Agregá registro A: ${GREEN}studio.$DOMAIN${NC} → IP del servidor (Proxy ON)"
 echo -e "  2. Agregá registro A: ${GREEN}api.$DOMAIN${NC} → IP del servidor (Proxy ON)"
 echo -e "  3. SSL/TLS modo: ${GREEN}Full${NC}"
+echo ""
+echo -e "${CYAN}IMPORTANTE: Esperá 2-3 minutos para que Let's Encrypt genere los certificados SSL.${NC}"
+echo -e "${CYAN}Si ves error 521, verificá con: cd /opt/supabase && docker compose logs traefik${NC}"
 echo ""
