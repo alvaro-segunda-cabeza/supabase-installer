@@ -75,11 +75,141 @@ cd "$INSTALL_DIR"
 # Clonar el repo oficial de docker de supabase (solo la carpeta docker)
 echo -e "${GREEN}Descargando configuración de Supabase...${NC}"
 git clone --depth 1 https://github.com/supabase/supabase.git temp_repo
-mv temp_repo/docker/* .
+
+# Verificar donde está la carpeta docker
+if [ -d "temp_repo/docker" ]; then
+    cp -r temp_repo/docker/* .
+elif [ -d "temp_repo" ]; then
+    # Si no hay carpeta docker, buscar archivos relevantes
+    find temp_repo -name "docker-compose.yml" -type f -exec dirname {} \; | head -1 | xargs -I {} cp -r {}/* .
+fi
+
 rm -rf temp_repo
 
-# Copiar env example
-cp .env.example .env
+# Si no existe .env.example, crear uno básico
+if [ ! -f ".env.example" ]; then
+    echo -e "${YELLOW}Creando archivo .env desde cero...${NC}"
+    cat > .env <<'ENVFILE'
+############
+# Secrets
+############
+POSTGRES_PASSWORD=your-super-secret-and-long-postgres-password
+JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters-long
+ANON_KEY=your-anon-key
+SERVICE_ROLE_KEY=your-service-role-key
+DASHBOARD_USERNAME=supabase
+DASHBOARD_PASSWORD=this_password_is_insecure_and_should_be_updated
+
+############
+# Database - You can change these to any PostgreSQL database that has logical replication enabled.
+############
+POSTGRES_HOST=db
+POSTGRES_DB=postgres
+POSTGRES_PORT=5432
+
+############
+# API Proxy - Configuration for the Kong Reverse proxy.
+############
+KONG_HTTP_PORT=8000
+KONG_HTTPS_PORT=8443
+
+############
+# API - Configuration for PostgREST.
+############
+PGRST_DB_SCHEMAS=public,storage,graphql_public
+
+############
+# Auth - Configuration for the GoTrue authentication server.
+############
+SITE_URL=http://localhost:3000
+ADDITIONAL_REDIRECT_URLS=
+JWT_EXPIRY=3600
+DISABLE_SIGNUP=false
+API_EXTERNAL_URL=http://localhost:8000
+
+MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
+MAILER_URLPATHS_INVITE=/auth/v1/verify
+MAILER_URLPATHS_RECOVERY=/auth/v1/verify
+MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
+
+############
+# Email auth
+############
+ENABLE_EMAIL_SIGNUP=true
+ENABLE_EMAIL_AUTOCONFIRM=false
+SMTP_ADMIN_EMAIL=admin@example.com
+SMTP_HOST=mail
+SMTP_PORT=2500
+SMTP_USER=fake_mail_user
+SMTP_PASS=fake_mail_password
+SMTP_SENDER_NAME=fake_sender
+
+############
+# Phone auth
+############
+ENABLE_PHONE_SIGNUP=true
+ENABLE_PHONE_AUTOCONFIRM=true
+
+############
+# Studio - Configuration for the Dashboard
+############
+STUDIO_DEFAULT_ORGANIZATION=Default Organization
+STUDIO_DEFAULT_PROJECT=Default Project
+SUPABASE_PUBLIC_URL=http://localhost:8000
+
+############
+# Functions - Configuration for Functions
+############
+FUNCTIONS_VERIFY_JWT=false
+
+############
+# Logs - Configuration for Logflare
+############
+LOGFLARE_PUBLIC_ACCESS_TOKEN=your-logflare-token
+LOGFLARE_PRIVATE_ACCESS_TOKEN=your-logflare-private-token
+
+############
+# Metrics - Configuration for Prometheus
+############
+
+############
+# Pooler - Configuration for Supavisor
+############
+POOLER_DEFAULT_POOL_SIZE=20
+POOLER_MAX_CLIENT_CONN=100
+POOLER_TENANT_ID=pooler-dev
+POOLER_PROXY_PORT_TRANSACTION=6543
+POOLER_DB_POOL_SIZE=10
+
+############
+# Storage - Configuration for Supabase Storage
+############
+IMGPROXY_ENABLE_WEBP_DETECTION=true
+
+############
+# Edge Runtime - Configuration for Edge Runtime
+############
+DOCKER_SOCKET_LOCATION=/var/run/docker.sock
+
+############
+# Vault - Configuration for Supabase Vault
+############
+VAULT_ENC_KEY=your-vault-encryption-key
+
+############
+# Meta - Configuration for Supabase Meta
+############
+PG_META_CRYPTO_KEY=your-pg-meta-crypto-key
+
+############
+# Misc
+############
+SECRET_KEY_BASE=your-secret-key-base
+ENABLE_ANONYMOUS_USERS=false
+ENVFILE
+else
+    cp .env.example .env
+fi
 
 # 5. Generar Secretos Seguros
 echo -e "${GREEN}Generando secretos seguros...${NC}"
@@ -96,10 +226,10 @@ DASHBOARD_USERNAME="admin"
 DASHBOARD_PASSWORD=$(generate_secret)
 
 echo -e "${GREEN}Generando autenticación básica para el Dashboard...${NC}"
-# Generar hash para Traefik Basic Auth
+# Generar hash para Traefik Basic Auth (sin -B para evitar errores)
 BASIC_AUTH_USER="$DASHBOARD_USERNAME"
 BASIC_AUTH_PASS="$DASHBOARD_PASSWORD"
-BASIC_AUTH_HASH=$(htpasswd -nB $BASIC_AUTH_USER $BASIC_AUTH_PASS | sed 's/\$/\$\$/g')
+BASIC_AUTH_HASH=$(echo "$BASIC_AUTH_PASS" | htpasswd -ni $BASIC_AUTH_USER | sed 's/\$/\$\$/g')
 
 # Configurar TODAS las variables necesarias en el .env
 echo -e "${GREEN}Configurando variables de entorno...${NC}"
