@@ -28,7 +28,7 @@ docker ps -a | grep -E "supabase|traefik|postgres|kong" | awk '{print $1}' | xar
 docker volume ls | grep supabase | awk '{print $2}' | xargs -r docker volume rm 2>/dev/null || true
 
 if [ -d "/opt/supabase" ]; then
-    mv /opt/supabase /opt/supabase_backup_$(date +%s) 2>/dev/null || true
+    rm -rf /opt/supabase 2>/dev/null || true
 fi
 
 # 1. Solicitar información al usuario
@@ -201,14 +201,20 @@ sleep 30
 echo -e "${CYAN}Bueno no, no era así. Pero igual la instalación viene joya. Faltan unos 3 o 4 minutos, dependiendo cuánto hayas puesto en este servidor.${NC}"
 echo ""
 
-# 8. Corregir docker-compose.yml
+# 8. Corregir COMPLETAMENTE docker-compose.yml - TODAS las variantes del error
 if [ -f "docker-compose.yml" ]; then
+    # Corregir todas las variantes posibles del path duplicado
+    sed -i 's|/var/run/docker.sock/var/run/docker.sock|/var/run/docker.sock|g' docker-compose.yml
     sed -i 's|:/var/run/docker.sock:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
-    sed -i 's|:\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
+    sed -i 's|:\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:ro,z|\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro|g' docker-compose.yml
+    sed -i 's|:\${DOCKER_SOCKET_LOCATION}:ro,z|\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro|g' docker-compose.yml
+    
+    # Buscar y reemplazar cualquier línea que empiece con : en volumes
+    sed -i '/volumes:/,/^[^ ]/ s|^[[:space:]]*- :[^:]*:|      - /var/run/docker.sock:|g' docker-compose.yml
 fi
 
 # 9. Crear docker-compose.override.yml para Traefik
-cat <<EOF > docker-compose.override.yml
+cat <<'EOF' > docker-compose.override.yml
 version: "3.8"
 
 services:
@@ -224,7 +230,7 @@ services:
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=$EMAIL"
+      - "--certificatesresolvers.letsencrypt.acme.email=EMAIL_PLACEHOLDER"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--log.level=INFO"
     ports:
@@ -239,13 +245,13 @@ services:
   studio:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\`studio.$DOMAIN\`)"
+      - "traefik.http.routers.studio.rule=Host(\`studio.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.studio.entrypoints=websecure"
       - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
       - "traefik.http.routers.studio.middlewares=studio-auth,https-redirect"
-      - "traefik.http.middlewares.studio-auth.basicauth.users=$BASIC_AUTH_HASH"
-      - "traefik.http.routers.studio-http.rule=Host(\`studio.$DOMAIN\`)"
+      - "traefik.http.middlewares.studio-auth.basicauth.users=BASICAUTH_PLACEHOLDER"
+      - "traefik.http.routers.studio-http.rule=Host(\`studio.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.studio-http.entrypoints=web"
       - "traefik.http.routers.studio-http.middlewares=https-redirect"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
@@ -254,14 +260,24 @@ services:
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(\`api.$DOMAIN\`)"
+      - "traefik.http.routers.api.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
-      - "traefik.http.routers.api-http.rule=Host(\`api.$DOMAIN\`)"
+      - "traefik.http.routers.api-http.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
+
+  vector:
+    volumes:
+      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 EOF
+
+# Reemplazar placeholders
+sed -i "s|EMAIL_PLACEHOLDER|$EMAIL|g" docker-compose.override.yml
+sed -i "s|DOMAIN_PLACEHOLDER|$DOMAIN|g" docker-compose.override.yml
+sed -i "s|BASICAUTH_PLACEHOLDER|$BASIC_AUTH_HASH|g" docker-compose.override.yml
 
 mkdir -p letsencrypt volumes/logs
 touch letsencrypt/acme.json
@@ -275,9 +291,6 @@ echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
 sleep 60
-
-# 12. Verificar estado de los contenedores
-docker compose ps > /dev/null 2>&1
 
 echo -e "${CYAN}Listo, ponete a laburar.${NC}"
 echo ""
