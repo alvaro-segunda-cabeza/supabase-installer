@@ -203,14 +203,38 @@ echo ""
 
 # 8. Corregir COMPLETAMENTE docker-compose.yml - TODAS las variantes del error
 if [ -f "docker-compose.yml" ]; then
-    # Corregir todas las variantes posibles del path duplicado
+    echo -e "${CYAN}Corrigiendo configuración de Docker...${NC}"
+    
+    # Backup del original
+    cp docker-compose.yml docker-compose.yml.backup
+    
+    # Método 1: Reemplazos directos de paths incorrectos
     sed -i 's|/var/run/docker.sock/var/run/docker.sock|/var/run/docker.sock|g' docker-compose.yml
     sed -i 's|:/var/run/docker.sock:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
     sed -i 's|:\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:ro,z|\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro|g' docker-compose.yml
     sed -i 's|:\${DOCKER_SOCKET_LOCATION}:ro,z|\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro|g' docker-compose.yml
     
-    # Buscar y reemplazar cualquier línea que empiece con : en volumes
-    sed -i '/volumes:/,/^[^ ]/ s|^[[:space:]]*- :[^:]*:|      - /var/run/docker.sock:|g' docker-compose.yml
+    # Método 2: Buscar CUALQUIER línea de volumen que empiece con : o ${ sin path correcto
+    sed -i '/volumes:/,/^[^ ]/ {
+        s|^[[:space:]]*- :[^:]*:\(/var/run/docker.sock.*\)|      - /var/run/docker.sock:\1|g
+        s|^[[:space:]]*- \${DOCKER_SOCKET[^}]*}:\(/var/run/docker.sock.*\)|      - /var/run/docker.sock:\1|g
+    }' docker-compose.yml
+    
+    # Método 3: Forzar corrección en el servicio vector específicamente
+    # Buscar la sección de vector y corregir sus volúmenes
+    awk '
+    /^  vector:/ { in_vector=1 }
+    in_vector && /^  [a-z]/ && !/^  vector/ { in_vector=0 }
+    in_vector && /volumes:/ { in_volumes=1; print; next }
+    in_volumes && /^  [a-z]/ && !/^    / { in_volumes=0 }
+    in_volumes && /docker\.sock/ {
+        print "      - /var/run/docker.sock:/var/run/docker.sock:ro"
+        next
+    }
+    { print }
+    ' docker-compose.yml > docker-compose.yml.tmp && mv docker-compose.yml.tmp docker-compose.yml
+    
+    echo -e "${GREEN}✓ Configuración corregida${NC}"
 fi
 
 # 9. Crear docker-compose.override.yml con Nginx (sin SSL por ahora)
@@ -345,8 +369,17 @@ echo "$BASIC_AUTH_HASH" | sed 's/\$\$/\$/g' > nginx/conf.d/.htpasswd
 
 mkdir -p volumes/logs
 
-# 10. Iniciar servicios
-docker compose up -d > /dev/null 2>&1
+# 10. Iniciar servicios con force-recreate
+echo -e "${CYAN}Iniciando todos los servicios...${NC}"
+docker compose up -d --force-recreate 2>&1 | tee /tmp/docker-compose-up.log
+
+# Verificar si hubo errores en el inicio
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error al iniciar los servicios.${NC}"
+    echo -e "${YELLOW}Revisa el log completo:${NC}"
+    cat /tmp/docker-compose-up.log
+    exit 1
+fi
 
 sleep 60
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
@@ -364,14 +397,43 @@ KONG_RUNNING=$(docker ps --filter "name=supabase-kong" --format "{{.Names}}" 2>/
 
 if [ -z "$NGINX_RUNNING" ] || [ -z "$DB_RUNNING" ] || [ -z "$STUDIO_RUNNING" ] || [ -z "$KONG_RUNNING" ]; then
     echo -e "${RED}Algunos servicios no iniciaron correctamente.${NC}"
-    echo -e "${YELLOW}Mostrando logs de los últimos servicios:${NC}"
+    echo -e "${YELLOW}Mostrando estado de TODOS los contenedores:${NC}"
     echo ""
-    docker compose ps
+    docker compose ps -a
     echo ""
-    docker compose logs --tail=20
+    echo -e "${YELLOW}Logs de los servicios que fallaron:${NC}"
     echo ""
+    
+    # Mostrar logs de servicios que no están corriendo
+    if [ -z "$NGINX_RUNNING" ]; then
+        echo -e "${RED}=== Logs de Nginx ===${NC}"
+        docker compose logs nginx --tail=30
+        echo ""
+    fi
+    
+    if [ -z "$DB_RUNNING" ]; then
+        echo -e "${RED}=== Logs de Database ===${NC}"
+        docker compose logs db --tail=30
+        echo ""
+    fi
+    
+    if [ -z "$STUDIO_RUNNING" ]; then
+        echo -e "${RED}=== Logs de Studio ===${NC}"
+        docker compose logs studio --tail=30
+        echo ""
+    fi
+    
+    if [ -z "$KONG_RUNNING" ]; then
+        echo -e "${RED}=== Logs de Kong ===${NC}"
+        docker compose logs kong --tail=30
+        echo ""
+    fi
+    
     echo -e "${RED}Hubo un problema. Revisá los logs arriba.${NC}"
-    echo -e "${YELLOW}Podés intentar reiniciar con: cd /opt/supabase && docker compose restart${NC}"
+    echo -e "${YELLOW}Podés intentar:${NC}"
+    echo -e "  1. Ver configuración: ${GREEN}cd /opt/supabase && docker compose config${NC}"
+    echo -e "  2. Reiniciar todo:    ${GREEN}cd /opt/supabase && docker compose down && docker compose up -d${NC}"
+    echo -e "  3. Ver logs live:     ${GREEN}cd /opt/supabase && docker compose logs -f${NC}"
     exit 1
 fi
 
