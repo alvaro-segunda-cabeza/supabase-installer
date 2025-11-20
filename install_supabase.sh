@@ -17,40 +17,30 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Recopilar información desde argumentos, variables de entorno o interactivamente
-# Prioridad: argumentos > variables de entorno > input interactivo
-DOMAIN="${1:-${SUPABASE_DOMAIN}}"
-EMAIL="${2:-${SUPABASE_EMAIL}}"
+# 1. Solicitar información al usuario
+echo -e "${GREEN}Configuración inicial:${NC}"
+echo ""
 
-if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
-    echo -e "${YELLOW}Puedes proporcionar el dominio y email de 3 formas:${NC}"
-    echo -e "1. Como argumentos: ${GREEN}./install_supabase.sh midominio.com admin@midominio.com${NC}"
-    echo -e "2. Como variables de entorno: ${GREEN}SUPABASE_DOMAIN=midominio.com SUPABASE_EMAIL=admin@midominio.com sudo -E bash install_supabase.sh${NC}"
-    echo -e "3. Interactivamente (a continuación):${NC}"
-    echo ""
-    
-    if [ -z "$DOMAIN" ]; then
-        read -p "Introduce tu dominio base (ej. mi-supabase.com): " DOMAIN </dev/tty
-    fi
-    
-    if [ -z "$EMAIL" ]; then
-        read -p "Introduce tu email para Let's Encrypt: " EMAIL </dev/tty
-    fi
-fi
+# Redirigir input desde /dev/tty para que funcione con pipes
+exec < /dev/tty
+
+read -p "Introduce tu dominio base (ej. midominio.com): " DOMAIN
+read -p "Introduce tu email para Let's Encrypt: " EMAIL
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✓ Configurando instalación:${NC}"
+echo ""
+echo -e "${GREEN}✓ Configuración confirmada:${NC}"
 echo -e "  Dominio: ${YELLOW}$DOMAIN${NC}"
 echo -e "  Email: ${YELLOW}$EMAIL${NC}"
 echo -e "  Studio: ${YELLOW}https://studio.$DOMAIN${NC}"
 echo -e "  API: ${YELLOW}https://api.$DOMAIN${NC}"
 echo ""
-
-sleep 2
+echo -e "${YELLOW}Iniciando instalación en 3 segundos...${NC}"
+sleep 3
 
 # 2. Actualizar sistema e instalar dependencias básicas
 echo -e "${GREEN}Actualizando sistema...${NC}"

@@ -6,7 +6,7 @@ Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente
 
 ## Características
 
-- 🚀 **Instalación en 1 click**: Instala Docker, Supabase y configura todo automáticamente.
+- 🚀 **Instalación en 1 comando**: Instala Docker, Supabase y configura todo automáticamente.
 - 🔒 **SSL Automático**: Traefik gestiona los certificados Let's Encrypt.
 - 🛡️ **Seguridad**: Protege el Dashboard (Studio) con autenticación básica.
 - ☁️ **Cloudflare Ready**: Compatible con el modo proxy de Cloudflare.
@@ -19,56 +19,26 @@ Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente
 - Un dominio (ej. `midominio.com`) apuntando a la IP del servidor.
   - Necesitas registros A para `studio.midominio.com` y `api.midominio.com`.
 
-## Instalación Rápida
-
-### Opción 1: Con variables de entorno (Recomendado para curl | bash)
-
-```bash
-curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo SUPABASE_DOMAIN=midominio.com SUPABASE_EMAIL=admin@midominio.com bash
-```
-
-Reemplaza `midominio.com` con tu dominio y `admin@midominio.com` con tu email.
-
-### Opción 2: Descargando y ejecutando
-
-```bash
-curl -O https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh
-chmod +x install_supabase.sh
-sudo ./install_supabase.sh midominio.com admin@midominio.com
-```
-
-### Opción 3: Clonando el repositorio
-
-```bash
-git clone https://github.com/alvaro-segunda-cabeza/supabase-installer.git
-cd supabase-installer
-chmod +x install_supabase.sh
-sudo ./install_supabase.sh midominio.com admin@midominio.com
-```
-
-### Opción 4: Interactiva
-
-Si no proporcionas el dominio y email, el script te los pedirá:
+## Instalación en 1 Comando
 
 ```bash
 curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash
 ```
 
-## Durante la instalación
+Durante la instalación, el script te pedirá:
+1. **Dominio**: El dominio base (ej. `midominio.com`)
+2. **Email**: Para el registro de certificados SSL de Let's Encrypt
 
-El script te pedirá:
-1. **Dominio Base**: El dominio donde alojarás los servicios (ej. `midominio.com`).
-2. **Email**: Para el registro de certificados SSL de Let's Encrypt.
+¡Eso es todo! El script se encarga del resto.
 
 ## Post-Instalación
 
 Al finalizar, el script te mostrará:
-- **URL del Dashboard**: `https://studio.midominio.com`
-- **URL de la API**: `https://api.midominio.com`
+- **URL del Dashboard**: `https://studio.tudominio.com`
+- **URL de la API**: `https://api.tudominio.com`
 - **Credenciales**:
   - Usuario/Pass para entrar al Dashboard (Basic Auth).
   - Contraseña de la Base de Datos (Postgres).
-  - Claves de API (Anon/Service) - *Nota: Se usan las claves por defecto para asegurar compatibilidad inicial, se recomienda rotarlas en producción.*
 
 ### Configuración de Cloudflare
 
@@ -82,3 +52,29 @@ El script instala Supabase en `/opt/supabase`.
 - `docker-compose.yml`: Configuración base de Supabase.
 - `docker-compose.override.yml`: Configuración de Traefik inyectada por el script.
 - `.env`: Variables de entorno y secretos.
+
+## Gestión Post-Instalación
+
+### Ver logs
+```bash
+cd /opt/supabase
+docker compose logs -f
+```
+
+### Reiniciar servicios
+```bash
+cd /opt/supabase
+docker compose restart
+```
+
+### Detener servicios
+```bash
+cd /opt/supabase
+docker compose down
+```
+
+### Iniciar servicios
+```bash
+cd /opt/supabase
+docker compose up -d
+```
