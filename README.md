@@ -22,7 +22,7 @@ Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente
 ## Instalación en 1 Comando
 
 ```bash
-curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash
+bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)
 ```
 
 Durante la instalación, el script te pedirá:

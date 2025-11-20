@@ -6,28 +6,18 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+echo -e "${GREEN}=== Instalador Profesional de Supabase con Traefik y SSL ===${NC}"
+echo -e "${YELLOW}Este script instalará Docker, Supabase y configurará Traefik con SSL automático.${NC}"
+echo -e "${YELLOW}Requisitos: Ubuntu/Debian, Dominio apuntando a este servidor (Cloudflare Proxy OK).${NC}"
+echo ""
+
 # Verificar si se ejecuta como root
 if [ "$EUID" -ne 0 ]; then 
   echo -e "${RED}Por favor, ejecuta este script como root o con sudo.${NC}"
   exit 1
 fi
 
-# Si se está ejecutando a través de pipe, descargamos el script y lo ejecutamos correctamente
-if [ ! -t 0 ]; then
-    echo -e "${YELLOW}Detectado pipe. Descargando script para ejecución interactiva...${NC}"
-    TEMP_SCRIPT="/tmp/install_supabase_$$.sh"
-    curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh -o "$TEMP_SCRIPT"
-    chmod +x "$TEMP_SCRIPT"
-    exec "$TEMP_SCRIPT" "$@"
-    exit 0
-fi
-
-echo -e "${GREEN}=== Instalador Profesional de Supabase con Traefik y SSL ===${NC}"
-echo -e "${YELLOW}Este script instalará Docker, Supabase y configurará Traefik con SSL automático.${NC}"
-echo -e "${YELLOW}Requisitos: Ubuntu/Debian, Dominio apuntando a este servidor (Cloudflare Proxy OK).${NC}"
-echo ""
-
-# 1. Solicitar información al usuario de forma simple
+# 1. Solicitar información al usuario
 echo -e "${GREEN}Configuración inicial:${NC}"
 echo ""
 echo -n "Introduce tu dominio base (ej. midominio.com): "
