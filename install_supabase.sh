@@ -9,6 +9,7 @@ set -e
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Function to generate JWT (HS256) using openssl
@@ -34,26 +35,31 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # 1. Update & Install Dependencies
-echo -e "${GREEN}[1/5] Updating system...${NC}"
-apt-get update -qq && apt-get upgrade -y -qq
+echo -e "${GREEN}[1/6] Updating system...${NC}"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
 apt-get install -y -qq curl git openssl
 
 # 2. Install Docker
-echo -e "${GREEN}[2/5] Installing Docker...${NC}"
+echo -e "${GREEN}[2/6] Installing Docker...${NC}"
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
+    systemctl enable docker > /dev/null 2>&1
+    systemctl start docker > /dev/null 2>&1
 fi
 
 # 3. Clone Supabase
-echo -e "${GREEN}[3/5] Downloading Supabase...${NC}"
+echo -e "${GREEN}[3/6] Downloading Supabase...${NC}"
 INSTALL_DIR="/opt/supabase"
 if [ -d "$INSTALL_DIR" ]; then
+    echo -e "${YELLOW}Removing existing installation...${NC}"
+    cd "$INSTALL_DIR/docker" 2>/dev/null && docker compose down 2>/dev/null || true
     rm -rf "$INSTALL_DIR"
 fi
 git clone --depth 1 https://github.com/supabase/supabase "$INSTALL_DIR" > /dev/null 2>&1
 
 # 4. Generate Secrets
-echo -e "${GREEN}[4/5] Generating secure keys...${NC}"
+echo -e "${GREEN}[4/6] Generating secure keys...${NC}"
 cd "$INSTALL_DIR/docker"
 cp .env.example .env
 
@@ -83,13 +89,19 @@ if [[ "$SETUP_SSL" =~ ^[Yy]$ ]]; then
     read -p "Email: " EMAIL
     
     if [ ! -z "$DOMAIN" ] && [ ! -z "$EMAIL" ]; then
-        # Create Traefik config (Cloudflare-compatible)
+        echo -e "${GREEN}[5/6] Configuring SSL...${NC}"
+        
+        # Create Traefik config (Cloudflare-compatible with HTTP challenge)
         cat <<EOF > docker-compose.override.yml
+version: "3.8"
+
 services:
   traefik:
     image: traefik:v2.10
     container_name: traefik
     command:
+      - "--log.level=INFO"
+      - "--api.dashboard=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
@@ -106,6 +118,8 @@ services:
     volumes:
       - "./letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - default
     restart: unless-stopped
 
   studio:
@@ -113,40 +127,75 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.studio.rule=Host(\`studio.${DOMAIN}\`)"
       - "traefik.http.routers.studio.entrypoints=websecure"
+      - "traefik.http.routers.studio.tls=true"
       - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
 
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(\`api.${DOMAIN}\`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      - "traefik.http.routers.kong.rule=Host(\`api.${DOMAIN}\`)"
+      - "traefik.http.routers.kong.entrypoints=websecure"
+      - "traefik.http.routers.kong.tls=true"
+      - "traefik.http.routers.kong.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kong.loadbalancer.server.port=8000"
 EOF
         
         sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.${DOMAIN}|" .env
         sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.${DOMAIN}|" .env
         
-        echo -e "${BLUE}SSL configured for studio.${DOMAIN} and api.${DOMAIN}${NC}"
+        echo -e "${BLUE}✓ SSL configured for studio.${DOMAIN} and api.${DOMAIN}${NC}"
+        echo -e "${YELLOW}⚠ Make sure DNS records point to this server before continuing!${NC}"
+        echo ""
+        read -p "Press Enter to continue when DNS is ready..."
+    else
+        echo -e "${YELLOW}Skipping SSL configuration${NC}"
+        SETUP_SSL="n"
     fi
+else
+    echo -e "${GREEN}[5/6] Skipping SSL...${NC}"
 fi
 
-# 5. Start
-echo -e "${GREEN}[5/5] Starting services...${NC}"
+# 6. Start
+echo -e "${GREEN}[6/6] Starting services (this may take a few minutes)...${NC}"
 docker compose pull -q
 docker compose up -d
+
+# Wait for services to be healthy
+echo -e "${BLUE}Waiting for services to start...${NC}"
+sleep 10
+
+# Check if services are running
+RUNNING=$(docker ps --filter "name=supabase" --format "{{.Names}}" | wc -l)
+if [ "$RUNNING" -lt 5 ]; then
+    echo -e "${RED}Warning: Some services may not have started. Check logs with: docker compose logs${NC}"
+fi
 
 echo ""
 echo -e "${GREEN}✓ Installation complete!${NC}"
 echo ""
+
+# Get server IP
+SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
+
 if [[ "$SETUP_SSL" =~ ^[Yy]$ ]] && [ ! -z "$DOMAIN" ]; then
-    echo -e "${BLUE}Studio: https://studio.${DOMAIN}${NC}"
-    echo -e "${BLUE}API:    https://api.${DOMAIN}${NC}"
+    echo -e "${BLUE}📍 Access URLs:${NC}"
+    echo -e "   Studio: ${GREEN}https://studio.${DOMAIN}${NC}"
+    echo -e "   API:    ${GREEN}https://api.${DOMAIN}${NC}"
+    echo ""
+    echo -e "${YELLOW}⏳ SSL certificates may take 1-2 minutes to generate.${NC}"
+    echo -e "${YELLOW}   If you see 'not secure', wait a moment and refresh.${NC}"
 else
-    SERVER_IP=$(curl -s ifconfig.me)
-    echo -e "${BLUE}Studio: http://${SERVER_IP}:3000${NC}"
-    echo -e "${BLUE}API:    http://${SERVER_IP}:8000${NC}"
+    echo -e "${BLUE}📍 Access URLs:${NC}"
+    echo -e "   Studio: ${GREEN}http://${SERVER_IP}:3000${NC}"
+    echo -e "   API:    ${GREEN}http://${SERVER_IP}:8000${NC}"
 fi
+
 echo ""
-echo -e "Credentials: ${INSTALL_DIR}/docker/.env"
+echo -e "${BLUE}🔑 Credentials saved in:${NC} /opt/supabase/docker/.env"
+echo ""
+echo -e "${BLUE}📋 Useful commands:${NC}"
+echo -e "   Check status:  ${GREEN}docker ps${NC}"
+echo -e "   View logs:     ${GREEN}cd /opt/supabase/docker && docker compose logs -f${NC}"
+echo -e "   Restart:       ${GREEN}cd /opt/supabase/docker && docker compose restart${NC}"
+echo ""
