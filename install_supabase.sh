@@ -214,7 +214,7 @@ if [ -f "docker-compose.yml" ]; then
 fi
 
 # 9. Crear docker-compose.override.yml para Traefik
-cat <<'EOF' > docker-compose.override.yml
+cat > docker-compose.override.yml <<EOF
 version: "3.8"
 
 services:
@@ -230,7 +230,7 @@ services:
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=EMAIL_PLACEHOLDER"
+      - "--certificatesresolvers.letsencrypt.acme.email=$EMAIL"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--log.level=INFO"
     ports:
@@ -245,13 +245,13 @@ services:
   studio:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\`studio.DOMAIN_PLACEHOLDER\`)"
+      - "traefik.http.routers.studio.rule=Host(\\\`studio.$DOMAIN\\\`)"
       - "traefik.http.routers.studio.entrypoints=websecure"
       - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
       - "traefik.http.routers.studio.middlewares=studio-auth,https-redirect"
-      - "traefik.http.middlewares.studio-auth.basicauth.users=BASICAUTH_PLACEHOLDER"
-      - "traefik.http.routers.studio-http.rule=Host(\`studio.DOMAIN_PLACEHOLDER\`)"
+      - "traefik.http.middlewares.studio-auth.basicauth.users=$BASIC_AUTH_HASH"
+      - "traefik.http.routers.studio-http.rule=Host(\\\`studio.$DOMAIN\\\`)"
       - "traefik.http.routers.studio-http.entrypoints=web"
       - "traefik.http.routers.studio-http.middlewares=https-redirect"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
@@ -260,11 +260,11 @@ services:
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
+      - "traefik.http.routers.api.rule=Host(\\\`api.$DOMAIN\\\`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
-      - "traefik.http.routers.api-http.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
+      - "traefik.http.routers.api-http.rule=Host(\\\`api.$DOMAIN\\\`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
 
