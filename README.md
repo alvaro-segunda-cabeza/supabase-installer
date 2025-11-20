@@ -21,21 +21,21 @@ Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente
 
 ## Instalación Rápida
 
-### Opción 1: Con argumentos (Recomendado)
+### Opción 1: Con variables de entorno (Recomendado para curl | bash)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash -s midominio.com admin@midominio.com
+curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo SUPABASE_DOMAIN=midominio.com SUPABASE_EMAIL=admin@midominio.com bash
 ```
 
 Reemplaza `midominio.com` con tu dominio y `admin@midominio.com` con tu email.
 
-### Opción 2: Interactiva
+### Opción 2: Descargando y ejecutando
 
 ```bash
-curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash
+curl -O https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh
+chmod +x install_supabase.sh
+sudo ./install_supabase.sh midominio.com admin@midominio.com
 ```
-
-El script te pedirá el dominio y email si no los proporcionas.
 
 ### Opción 3: Clonando el repositorio
 
@@ -44,6 +44,14 @@ git clone https://github.com/alvaro-segunda-cabeza/supabase-installer.git
 cd supabase-installer
 chmod +x install_supabase.sh
 sudo ./install_supabase.sh midominio.com admin@midominio.com
+```
+
+### Opción 4: Interactiva
+
+Si no proporcionas el dominio y email, el script te los pedirá:
+
+```bash
+curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash
 ```
 
 ## Durante la instalación

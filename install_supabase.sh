@@ -17,15 +17,17 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Recopilar información desde argumentos o interactivamente
-DOMAIN="$1"
-EMAIL="$2"
+# 1. Recopilar información desde argumentos, variables de entorno o interactivamente
+# Prioridad: argumentos > variables de entorno > input interactivo
+DOMAIN="${1:-${SUPABASE_DOMAIN}}"
+EMAIL="${2:-${SUPABASE_EMAIL}}"
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
-    echo -e "${YELLOW}Uso: $0 <dominio> <email>${NC}"
-    echo -e "${YELLOW}Ejemplo: $0 midominio.com admin@midominio.com${NC}"
+    echo -e "${YELLOW}Puedes proporcionar el dominio y email de 3 formas:${NC}"
+    echo -e "1. Como argumentos: ${GREEN}./install_supabase.sh midominio.com admin@midominio.com${NC}"
+    echo -e "2. Como variables de entorno: ${GREEN}SUPABASE_DOMAIN=midominio.com SUPABASE_EMAIL=admin@midominio.com sudo -E bash install_supabase.sh${NC}"
+    echo -e "3. Interactivamente (a continuación):${NC}"
     echo ""
-    echo -e "${YELLOW}O proporciona los datos ahora:${NC}"
     
     if [ -z "$DOMAIN" ]; then
         read -p "Introduce tu dominio base (ej. mi-supabase.com): " DOMAIN </dev/tty
@@ -41,11 +43,11 @@ if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     exit 1
 fi
 
-echo -e "${GREEN}Configurando para:${NC}"
-echo -e "Dominio: ${YELLOW}$DOMAIN${NC}"
-echo -e "Email: ${YELLOW}$EMAIL${NC}"
-echo -e "Studio será accesible en: ${YELLOW}studio.$DOMAIN${NC}"
-echo -e "API será accesible en: ${YELLOW}api.$DOMAIN${NC}"
+echo -e "${GREEN}✓ Configurando instalación:${NC}"
+echo -e "  Dominio: ${YELLOW}$DOMAIN${NC}"
+echo -e "  Email: ${YELLOW}$EMAIL${NC}"
+echo -e "  Studio: ${YELLOW}https://studio.$DOMAIN${NC}"
+echo -e "  API: ${YELLOW}https://api.$DOMAIN${NC}"
 echo ""
 
 sleep 2
