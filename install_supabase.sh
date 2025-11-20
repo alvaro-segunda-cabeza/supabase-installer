@@ -85,10 +85,14 @@ ANON_KEY=$(generate_jwt "$ANON_PAYLOAD" "$JWT_SECRET")
 SERVICE_PAYLOAD="{\"role\":\"service_role\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
 SERVICE_KEY=$(generate_jwt "$SERVICE_PAYLOAD" "$JWT_SECRET")
 
-sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
-sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env
-sed -i "s|ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
-sed -i "s|SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_KEY|" .env
+# Update .env using a safer method with perl instead of sed
+export DB_PASSWORD JWT_SECRET ANON_KEY SERVICE_KEY
+perl -i -pe "s/POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=\Q$ENV{DB_PASSWORD}\E/" .env
+perl -i -pe "s/JWT_SECRET=.*/JWT_SECRET=\Q$ENV{JWT_SECRET}\E/" .env
+perl -i -pe "s/ANON_KEY=.*/ANON_KEY=\Q$ENV{ANON_KEY}\E/" .env
+perl -i -pe "s/SERVICE_ROLE_KEY=.*/SERVICE_ROLE_KEY=\Q$ENV{SERVICE_KEY}\E/" .env
+
+echo -e "${BLUE}  ✓ Keys generated${NC}"
 
 # Ask for SSL
 echo ""
