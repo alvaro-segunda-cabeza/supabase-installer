@@ -4,11 +4,10 @@
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=== Instalador Profesional de Supabase con Traefik y SSL ===${NC}"
-echo -e "${YELLOW}Este script instalará Docker, Supabase y configurará Traefik con SSL automático.${NC}"
-echo -e "${YELLOW}Requisitos: Ubuntu/Debian, Dominio apuntando a este servidor (Cloudflare Proxy OK).${NC}"
+echo -e "${CYAN}Estamos intentando instalar Supabase con un solo comando.${NC}"
 echo ""
 
 # Verificar si se ejecuta como root
@@ -18,31 +17,21 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # 0. Limpiar instalaciones previas
-echo -e "${YELLOW}Limpiando instalaciones previas de Supabase...${NC}"
 if [ -d "/opt/supabase" ]; then
     cd /opt/supabase
     docker compose down -v 2>/dev/null || true
     cd /
 fi
 
-# Detener y eliminar contenedores de Supabase
 docker ps -a | grep -E "supabase|traefik|postgres|kong" | awk '{print $1}' | xargs -r docker stop 2>/dev/null || true
 docker ps -a | grep -E "supabase|traefik|postgres|kong" | awk '{print $1}' | xargs -r docker rm 2>/dev/null || true
-
-# Eliminar volúmenes de Docker relacionados
 docker volume ls | grep supabase | awk '{print $2}' | xargs -r docker volume rm 2>/dev/null || true
 
-# Hacer backup del directorio si existe
 if [ -d "/opt/supabase" ]; then
-    echo -e "${YELLOW}Respaldando instalación anterior...${NC}"
     mv /opt/supabase /opt/supabase_backup_$(date +%s) 2>/dev/null || true
 fi
 
-echo -e "${GREEN}✓ Limpieza completada${NC}"
-echo ""
-
 # 1. Solicitar información al usuario
-echo -e "${GREEN}Configuración inicial:${NC}"
 echo ""
 echo -n "Introduce tu dominio base (ej. midominio.com): "
 read DOMAIN
@@ -55,54 +44,45 @@ if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
 fi
 
 echo ""
-echo -e "${GREEN}✓ Configuración confirmada:${NC}"
-echo -e "  Dominio: ${YELLOW}$DOMAIN${NC}"
-echo -e "  Email: ${YELLOW}$EMAIL${NC}"
-echo -e "  Studio: ${YELLOW}https://studio.$DOMAIN${NC}"
-echo -e "  API: ${YELLOW}https://api.$DOMAIN${NC}"
-echo ""
-echo -e "${YELLOW}Iniciando instalación en 3 segundos...${NC}"
-sleep 3
 
 # 2. Actualizar sistema e instalar dependencias básicas
-echo -e "${GREEN}Actualizando sistema...${NC}"
-apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
-apt-get install -y curl git wget sudo apache2-utils
+apt-get update -y > /dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" > /dev/null 2>&1
+apt-get install -y curl git wget sudo apache2-utils > /dev/null 2>&1
+
+sleep 30
+echo -e "${CYAN}Ah re que intentando, nada que ver el chabón. Venimos bien.${NC}"
+echo ""
 
 # 3. Instalar Docker y Docker Compose
 if ! command -v docker &> /dev/null; then
-    echo -e "${GREEN}Instalando Docker...${NC}"
     curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
+    sh get-docker.sh > /dev/null 2>&1
     rm get-docker.sh
-else
-    echo -e "${GREEN}Docker ya está instalado.${NC}"
 fi
 
-# Asegurarse de que Docker está corriendo
-systemctl enable docker
-systemctl start docker
+systemctl enable docker > /dev/null 2>&1
+systemctl start docker > /dev/null 2>&1
 
 # 4. Preparar directorio de Supabase
 INSTALL_DIR="/opt/supabase"
-echo -e "${GREEN}Creando directorio de instalación...${NC}"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # 5. Descargar configuración de Supabase desde GitHub
-echo -e "${GREEN}Descargando configuración de Supabase...${NC}"
-git clone --depth 1 https://github.com/supabase/supabase.git temp_repo
+git clone --depth 1 https://github.com/supabase/supabase.git temp_repo > /dev/null 2>&1
 
-# Copiar archivos de docker
 if [ -d "temp_repo/docker" ]; then
     cp -r temp_repo/docker/* .
 fi
 
 rm -rf temp_repo
 
+sleep 30
+echo -e "${CYAN}Supabase viene del griego supa, que significa base.${NC}"
+echo ""
+
 # 6. Generar Secretos Seguros
-echo -e "${GREEN}Generando secretos seguros...${NC}"
 generate_secret() {
     openssl rand -base64 32 | tr -d '/+=' | head -c 32
 }
@@ -117,11 +97,9 @@ VAULT_ENC_KEY=$(generate_secret)
 PG_META_CRYPTO_KEY=$(generate_secret)
 SECRET_KEY_BASE=$(generate_secret)
 
-echo -e "${GREEN}Generando autenticación básica para el Dashboard...${NC}"
-BASIC_AUTH_HASH=$(echo "$DASHBOARD_PASSWORD" | htpasswd -ni $DASHBOARD_USERNAME | sed 's/\$/\$\$/g')
+BASIC_AUTH_HASH=$(echo "$DASHBOARD_PASSWORD" | htpasswd -ni $DASHBOARD_USERNAME 2>/dev/null | sed 's/\$/\$\$/g')
 
 # 7. Crear archivo .env completo
-echo -e "${GREEN}Creando archivo de configuración .env...${NC}"
 cat > .env <<ENVFILE
 # Secrets
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
@@ -205,7 +183,6 @@ SECRET_KEY_BASE=$SECRET_KEY_BASE
 ENABLE_ANONYMOUS_USERS=false
 ENVFILE
 
-# Guardar credenciales
 cat > /root/supabase_credentials.txt <<CREDS
 === CREDENCIALES DE SUPABASE ===
 Dominio: $DOMAIN
@@ -220,15 +197,17 @@ API URL: https://api.$DOMAIN
 =================================
 CREDS
 
-# 8. Corregir docker-compose.yml (eliminar el error del socket)
-echo -e "${GREEN}Corrigiendo archivos de Docker Compose...${NC}"
+sleep 30
+echo -e "${CYAN}Bueno no, no era así. Pero igual la instalación viene joya. Faltan unos 3 o 4 minutos, dependiendo cuánto hayas puesto en este servidor.${NC}"
+echo ""
+
+# 8. Corregir docker-compose.yml
 if [ -f "docker-compose.yml" ]; then
     sed -i 's|:/var/run/docker.sock:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
     sed -i 's|:\${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:ro,z|/var/run/docker.sock:/var/run/docker.sock:ro|g' docker-compose.yml
 fi
 
 # 9. Crear docker-compose.override.yml para Traefik
-echo -e "${GREEN}Configurando Traefik y SSL...${NC}"
 cat <<EOF > docker-compose.override.yml
 version: "3.8"
 
@@ -284,45 +263,39 @@ services:
       - "traefik.http.routers.api-http.middlewares=https-redirect"
 EOF
 
-# Crear directorio para certificados
 mkdir -p letsencrypt volumes/logs
 touch letsencrypt/acme.json
 chmod 600 letsencrypt/acme.json
 
 # 10. Iniciar servicios
-echo -e "${GREEN}Iniciando contenedores de Supabase...${NC}"
-docker compose up -d
+docker compose up -d > /dev/null 2>&1
 
-# 11. Esperar a que los servicios estén listos
-echo -e "${YELLOW}Esperando a que los servicios inicien (esto puede tomar 1-2 minutos)...${NC}"
-sleep 30
+sleep 60
+echo -e "${CYAN}Estamos próximos a terminar.${NC}"
+echo ""
+
+sleep 60
 
 # 12. Verificar estado de los contenedores
-echo -e "${GREEN}Estado de los contenedores:${NC}"
-docker compose ps
+docker compose ps > /dev/null 2>&1
 
+echo -e "${CYAN}Listo, ponete a laburar.${NC}"
 echo ""
-echo -e "${GREEN}=== ✓ Instalación Completada ===${NC}"
 echo ""
-echo -e "${GREEN}Tus credenciales (también guardadas en /root/supabase_credentials.txt):${NC}"
-echo -e "  Postgres Password: ${YELLOW}$POSTGRES_PASSWORD${NC}"
-echo -e "  Anon Key:          ${YELLOW}$ANON_KEY${NC}"
-echo -e "  Service Role Key:  ${YELLOW}$SERVICE_KEY${NC}"
+echo -e "${YELLOW}Tus credenciales (guardadas en /root/supabase_credentials.txt):${NC}"
+echo ""
+echo -e "  Dashboard URL:     ${GREEN}https://studio.$DOMAIN${NC}"
 echo -e "  Dashboard User:    ${YELLOW}$DASHBOARD_USERNAME${NC}"
 echo -e "  Dashboard Pass:    ${YELLOW}$DASHBOARD_PASSWORD${NC}"
 echo ""
-echo -e "  Dashboard URL:     ${YELLOW}https://studio.$DOMAIN${NC}"
-echo -e "  API URL:           ${YELLOW}https://api.$DOMAIN${NC}"
+echo -e "  API URL:           ${GREEN}https://api.$DOMAIN${NC}"
+echo -e "  Anon Key:          ${YELLOW}$ANON_KEY${NC}"
+echo -e "  Service Role Key:  ${YELLOW}$SERVICE_KEY${NC}"
 echo ""
-echo -e "${YELLOW}IMPORTANTE - Configuración DNS en Cloudflare:${NC}"
-echo -e "  1. Ve a Cloudflare > DNS > Records"
-echo -e "  2. Crea registro A: ${GREEN}studio.$DOMAIN${NC} -> IP de tu servidor (Proxy: ${GREEN}Activado${NC})"
-echo -e "  3. Crea registro A: ${GREEN}api.$DOMAIN${NC} -> IP de tu servidor (Proxy: ${GREEN}Activado${NC})"
-echo -e "  4. En SSL/TLS > Overview, selecciona modo: ${GREEN}Full${NC}"
+echo -e "  Postgres Password: ${YELLOW}$POSTGRES_PASSWORD${NC}"
 echo ""
-echo -e "${YELLOW}Comandos útiles:${NC}"
-echo -e "  Ver logs:     ${GREEN}cd /opt/supabase && docker compose logs -f${NC}"
-echo -e "  Reiniciar:    ${GREEN}cd /opt/supabase && docker compose restart${NC}"
-echo -e "  Detener:      ${GREEN}cd /opt/supabase && docker compose down${NC}"
-echo -e "  Iniciar:      ${GREEN}cd /opt/supabase && docker compose up -d${NC}"
+echo -e "${YELLOW}Configurá el DNS en Cloudflare:${NC}"
+echo -e "  1. Agregá registro A: ${GREEN}studio.$DOMAIN${NC} → IP del servidor (Proxy ON)"
+echo -e "  2. Agregá registro A: ${GREEN}api.$DOMAIN${NC} → IP del servidor (Proxy ON)"
+echo -e "  3. SSL/TLS modo: ${GREEN}Full${NC}"
 echo ""
