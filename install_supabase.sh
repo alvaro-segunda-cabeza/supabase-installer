@@ -17,13 +17,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Solicitar información al usuario
+# 1. Solicitar información al usuario de forma simple
 echo -e "${GREEN}Configuración inicial:${NC}"
 echo ""
-
-# Usar /dev/tty correctamente para leer en cualquier escenario
-read -p "Introduce tu dominio base (ej. midominio.com): " DOMAIN < /dev/tty
-read -p "Introduce tu email para Let's Encrypt: " EMAIL < /dev/tty
+echo -n "Introduce tu dominio base (ej. midominio.com): "
+read DOMAIN
+echo -n "Introduce tu email para Let's Encrypt: "
+read EMAIL
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
