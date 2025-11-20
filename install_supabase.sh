@@ -13,7 +13,7 @@ echo ""
 
 # Verificar si se ejecuta como root
 if [ "$EUID" -ne 0 ]; then 
-  echo -e "${RED}Por favor, ejecuta este script como root (sudo).${NC}"
+  echo -e "${RED}Por favor, ejecuta este script como root o con sudo.${NC}"
   exit 1
 fi
 
@@ -21,11 +21,9 @@ fi
 echo -e "${GREEN}Configuración inicial:${NC}"
 echo ""
 
-# Redirigir input desde /dev/tty para que funcione con pipes
-exec < /dev/tty
-
-read -p "Introduce tu dominio base (ej. midominio.com): " DOMAIN
-read -p "Introduce tu email para Let's Encrypt: " EMAIL
+# Usar /dev/tty correctamente para leer en cualquier escenario
+read -p "Introduce tu dominio base (ej. midominio.com): " DOMAIN < /dev/tty
+read -p "Introduce tu email para Let's Encrypt: " EMAIL < /dev/tty
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
