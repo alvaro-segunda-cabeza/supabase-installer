@@ -214,7 +214,7 @@ if [ -f "docker-compose.yml" ]; then
 fi
 
 # 9. Crear docker-compose.override.yml para Traefik
-cat > docker-compose.override.yml <<EOF
+cat > docker-compose.override.yml << 'OVERRIDE_EOF'
 version: "3.8"
 
 services:
@@ -230,7 +230,7 @@ services:
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=$EMAIL"
+      - "--certificatesresolvers.letsencrypt.acme.email=EMAILPLACEHOLDER"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--log.level=INFO"
     ports:
@@ -245,13 +245,13 @@ services:
   studio:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\\\`studio.$DOMAIN\\\`)"
+      - "traefik.http.routers.studio.rule=Host(DOMAINSTUDIO)"
       - "traefik.http.routers.studio.entrypoints=websecure"
       - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
       - "traefik.http.routers.studio.middlewares=studio-auth,https-redirect"
-      - "traefik.http.middlewares.studio-auth.basicauth.users=$BASIC_AUTH_HASH"
-      - "traefik.http.routers.studio-http.rule=Host(\\\`studio.$DOMAIN\\\`)"
+      - "traefik.http.middlewares.studio-auth.basicauth.users=BASICAUTHPLACEHOLDER"
+      - "traefik.http.routers.studio-http.rule=Host(DOMAINSTUDIO)"
       - "traefik.http.routers.studio-http.entrypoints=web"
       - "traefik.http.routers.studio-http.middlewares=https-redirect"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
@@ -260,11 +260,11 @@ services:
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(\\\`api.$DOMAIN\\\`)"
+      - "traefik.http.routers.api.rule=Host(DOMAINAPI)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
-      - "traefik.http.routers.api-http.rule=Host(\\\`api.$DOMAIN\\\`)"
+      - "traefik.http.routers.api-http.rule=Host(DOMAINAPI)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
 
@@ -272,12 +272,13 @@ services:
     volumes:
       - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-EOF
+OVERRIDE_EOF
 
-# Reemplazar placeholders
-sed -i "s|EMAIL_PLACEHOLDER|$EMAIL|g" docker-compose.override.yml
-sed -i "s|DOMAIN_PLACEHOLDER|$DOMAIN|g" docker-compose.override.yml
-sed -i "s|BASICAUTH_PLACEHOLDER|$BASIC_AUTH_HASH|g" docker-compose.override.yml
+# Reemplazar placeholders usando sed de forma segura
+sed -i "s|EMAILPLACEHOLDER|$EMAIL|g" docker-compose.override.yml
+sed -i "s|DOMAINSTUDIO|\`studio.$DOMAIN\`|g" docker-compose.override.yml
+sed -i "s|DOMAINAPI|\`api.$DOMAIN\`|g" docker-compose.override.yml
+sed -i "s|BASICAUTHPLACEHOLDER|$BASIC_AUTH_HASH|g" docker-compose.override.yml
 
 mkdir -p letsencrypt volumes/logs
 touch letsencrypt/acme.json
