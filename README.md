@@ -18,16 +18,6 @@ bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase
 
 *(Asegúrate de reemplazar `alvaro-segunda-cabeza` con tu nombre de usuario de GitHub una vez publiques el repositorio).*
 
-## Opción "Cero Toque" (Cloud-Init / User Data)
-
-Si estás creando un VPS nuevo (en Hetzner, DigitalOcean, AWS), puedes hacer que se instale **automáticamente al arrancar** sin escribir ni un comando.
-
-1. Copia el contenido del archivo [`cloud-init.yaml`](cloud-init.yaml).
-2. Al crear tu servidor, busca la sección **"User Data"** o **"Cloud-Init"**.
-3. Pega el código YAML ahí.
-4. Crea el servidor.
-5. Espera unos 5 minutos y entra a `http://tu-ip:8000`. ¡Ya estará instalado!
-
 ## Instalación Manual
 
 Si prefieres ver el script antes de ejecutarlo:
