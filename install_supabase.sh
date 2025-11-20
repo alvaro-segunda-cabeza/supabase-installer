@@ -101,15 +101,59 @@ BASIC_AUTH_USER="$DASHBOARD_USERNAME"
 BASIC_AUTH_PASS="$DASHBOARD_PASSWORD"
 BASIC_AUTH_HASH=$(htpasswd -nB $BASIC_AUTH_USER $BASIC_AUTH_PASS | sed 's/\$/\$\$/g')
 
-# Actualizar .env con sed
-sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" .env
-sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|g" .env
+# Configurar TODAS las variables necesarias en el .env
+echo -e "${GREEN}Configurando variables de entorno...${NC}"
 
-# Configurar URLs externas
+# Variables de Postgres
+sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" .env
+sed -i "s|POSTGRES_HOST=.*|POSTGRES_HOST=db|g" .env
+sed -i "s|POSTGRES_DB=.*|POSTGRES_DB=postgres|g" .env
+sed -i "s|POSTGRES_PORT=.*|POSTGRES_PORT=5432|g" .env
+
+# Variables JWT y Keys
+sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|g" .env
+sed -i "s|ANON_KEY=.*|ANON_KEY=$ANON_KEY|g" .env
+sed -i "s|SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_KEY|g" .env
+
+# Variables de URLs
 sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.$DOMAIN|g" .env
 sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.$DOMAIN|g" .env
-sed -i "s|STUDIO_DEFAULT_ORGANIZATION=.*|STUDIO_DEFAULT_ORGANIZATION=Supabase|g" .env
-sed -i "s|STUDIO_DEFAULT_PROJECT=.*|STUDIO_DEFAULT_PROJECT=Supabase|g" .env
+sed -i "s|SITE_URL=.*|SITE_URL=https://studio.$DOMAIN|g" .env
+
+# Variables de Studio
+sed -i "s|STUDIO_DEFAULT_ORGANIZATION=.*|STUDIO_DEFAULT_ORGANIZATION=Default Organization|g" .env
+sed -i "s|STUDIO_DEFAULT_PROJECT=.*|STUDIO_DEFAULT_PROJECT=Default Project|g" .env
+
+# Variables de Dashboard
+sed -i "s|DASHBOARD_USERNAME=.*|DASHBOARD_USERNAME=$DASHBOARD_USERNAME|g" .env
+sed -i "s|DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=$DASHBOARD_PASSWORD|g" .env
+
+# Variables de Kong
+sed -i "s|KONG_HTTP_PORT=.*|KONG_HTTP_PORT=8000|g" .env
+sed -i "s|KONG_HTTPS_PORT=.*|KONG_HTTPS_PORT=8443|g" .env
+
+# Verificar que las variables se aplicaron
+if ! grep -q "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" .env; then
+    echo -e "${YELLOW}Agregando variables faltantes al .env...${NC}"
+    cat >> .env <<ENVVARS
+
+# Variables configuradas por el instalador
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+POSTGRES_HOST=db
+POSTGRES_DB=postgres
+POSTGRES_PORT=5432
+JWT_SECRET=$JWT_SECRET
+ANON_KEY=$ANON_KEY
+SERVICE_ROLE_KEY=$SERVICE_KEY
+API_EXTERNAL_URL=https://api.$DOMAIN
+SUPABASE_PUBLIC_URL=https://api.$DOMAIN
+SITE_URL=https://studio.$DOMAIN
+DASHBOARD_USERNAME=$DASHBOARD_USERNAME
+DASHBOARD_PASSWORD=$DASHBOARD_PASSWORD
+KONG_HTTP_PORT=8000
+KONG_HTTPS_PORT=8443
+ENVVARS
+fi
 
 # Guardar credenciales
 cat > /root/supabase_credentials.txt <<CREDS
@@ -179,6 +223,11 @@ services:
       - "traefik.http.routers.api-http.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
+
+  vector:
+    volumes:
+      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 EOF
 
 # Reemplazar placeholders
