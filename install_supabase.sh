@@ -213,7 +213,7 @@ if [ -f "docker-compose.yml" ]; then
     sed -i '/volumes:/,/^[^ ]/ s|^[[:space:]]*- :[^:]*:|      - /var/run/docker.sock:|g' docker-compose.yml
 fi
 
-# 9. Crear docker-compose.override.yml con Nginx en lugar de Traefik
+# 9. Crear docker-compose.override.yml con Nginx (sin SSL por ahora)
 cat > docker-compose.override.yml << 'OVERRIDE_EOF'
 services:
   nginx:
@@ -222,29 +222,18 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
     networks:
       - default
     depends_on:
       - studio
       - kong
-
-  certbot:
-    image: certbot/certbot
-    container_name: supabase-certbot
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 OVERRIDE_EOF
 
 # Crear directorio para nginx
-mkdir -p nginx/conf.d certbot/conf certbot/www
+mkdir -p nginx/conf.d
 
 # Crear configuración principal de nginx
 cat > nginx/nginx.conf << 'NGINX_MAIN'
@@ -278,35 +267,12 @@ http {
 }
 NGINX_MAIN
 
-# Crear configuración HTTP inicial (para obtener certificados)
+# Crear configuración HTTP (sin SSL)
 cat > nginx/conf.d/supabase.conf << NGINX_CONF
-# Redirección HTTP a HTTPS
+# Studio HTTP
 server {
     listen 80;
-    server_name studio.$DOMAIN api.$DOMAIN;
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-    
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-# Studio HTTPS
-server {
-    listen 443 ssl http2;
     server_name studio.$DOMAIN;
-    
-    # Certificados SSL (se generarán después)
-    ssl_certificate /etc/letsencrypt/live/studio.$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/studio.$DOMAIN/privkey.pem;
-    
-    # Configuración SSL moderna
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
     
     # Autenticación básica
     auth_basic "Supabase Studio";
@@ -325,19 +291,10 @@ server {
     }
 }
 
-# API HTTPS
+# API HTTP
 server {
-    listen 443 ssl http2;
+    listen 80;
     server_name api.$DOMAIN;
-    
-    # Certificados SSL (se generarán después)
-    ssl_certificate /etc/letsencrypt/live/api.$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.$DOMAIN/privkey.pem;
-    
-    # Configuración SSL moderna
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
     
     location / {
         proxy_pass http://kong:8000;
@@ -351,34 +308,47 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
 }
+
+# Acceso directo por IP
+server {
+    listen 80 default_server;
+    
+    location /studio {
+        rewrite ^/studio/(.*) /\$1 break;
+        proxy_pass http://studio:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+    
+    location /api {
+        rewrite ^/api/(.*) /\$1 break;
+        proxy_pass http://kong:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+    
+    location / {
+        return 200 'Supabase está corriendo. Accede a /studio o /api';
+        add_header Content-Type text/plain;
+    }
+}
 NGINX_CONF
 
 # Crear archivo .htpasswd para autenticación básica
 echo "$BASIC_AUTH_HASH" | sed 's/\$\$/\$/g' > nginx/conf.d/.htpasswd
 
-mkdir -p letsencrypt volumes/logs
+mkdir -p volumes/logs
 
 # 10. Iniciar servicios
 docker compose up -d > /dev/null 2>&1
 
-sleep 30
-
-# Generar certificados SSL con certbot
-echo -e "${CYAN}Generando certificados SSL...${NC}"
-docker compose run --rm certbot certonly --webroot --webroot-path=/var/www/certbot \
-  --email $EMAIL --agree-tos --no-eff-email \
-  -d studio.$DOMAIN -d api.$DOMAIN > /dev/null 2>&1
-
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ Certificados SSL generados${NC}"
-    # Reiniciar nginx para cargar los certificados
-    docker compose restart nginx > /dev/null 2>&1
-else
-    echo -e "${YELLOW}⚠ No se pudieron generar certificados SSL automáticamente${NC}"
-    echo -e "${YELLOW}  Verifica que los DNS estén configurados correctamente${NC}"
-fi
-
-sleep 30
+sleep 60
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
@@ -407,26 +377,36 @@ fi
 
 sleep 30
 
+# Obtener IP del servidor
+SERVER_IP=$(curl -4 -s ifconfig.me || curl -4 -s icanhazip.com || echo "tu-ip-del-servidor")
+
 echo -e "${CYAN}Listo, ponete a laburar.${NC}"
 echo ""
 echo ""
 echo -e "${YELLOW}Tus credenciales (guardadas en /root/supabase_credentials.txt):${NC}"
 echo ""
-echo -e "  Dashboard URL:     ${GREEN}https://studio.$DOMAIN${NC}"
 echo -e "  Dashboard User:    ${YELLOW}$DASHBOARD_USERNAME${NC}"
 echo -e "  Dashboard Pass:    ${YELLOW}$DASHBOARD_PASSWORD${NC}"
 echo ""
-echo -e "  API URL:           ${GREEN}https://api.$DOMAIN${NC}"
 echo -e "  Anon Key:          ${YELLOW}$ANON_KEY${NC}"
 echo -e "  Service Role Key:  ${YELLOW}$SERVICE_KEY${NC}"
-echo ""
 echo -e "  Postgres Password: ${YELLOW}$POSTGRES_PASSWORD${NC}"
 echo ""
-echo -e "${YELLOW}Configurá el DNS en Cloudflare:${NC}"
-echo -e "  1. Agregá registro A: ${GREEN}studio.$DOMAIN${NC} → IP del servidor (Proxy ON)"
-echo -e "  2. Agregá registro A: ${GREEN}api.$DOMAIN${NC} → IP del servidor (Proxy ON)"
-echo -e "  3. SSL/TLS modo: ${GREEN}Full${NC}"
+echo -e "${GREEN}=== Formas de acceder (HTTP, sin SSL) ===${NC}"
 echo ""
-echo -e "${CYAN}IMPORTANTE: Esperá 2-3 minutos para que Let's Encrypt genere los certificados SSL.${NC}"
-echo -e "${CYAN}Si ves error 521, verificá con: cd /opt/supabase && docker compose logs traefik${NC}"
+echo -e "${YELLOW}1. Por IP directamente:${NC}"
+echo -e "   ${GREEN}http://$SERVER_IP/studio${NC}"
+echo -e "   ${GREEN}http://$SERVER_IP/api${NC}"
+echo ""
+echo -e "${YELLOW}2. Por dominio (si DNS está configurado):${NC}"
+echo -e "   ${GREEN}http://studio.$DOMAIN${NC}"
+echo -e "   ${GREEN}http://api.$DOMAIN${NC}"
+echo ""
+echo -e "${CYAN}Configurá el DNS en Cloudflare:${NC}"
+echo -e "  1. Agregá registro A: ${GREEN}studio.$DOMAIN${NC} → $SERVER_IP (Proxy ${RED}OFF${NC})"
+echo -e "  2. Agregá registro A: ${GREEN}api.$DOMAIN${NC} → $SERVER_IP (Proxy ${RED}OFF${NC})"
+echo -e "  3. SSL/TLS modo: ${GREEN}Flexible${NC} (o desactivá el proxy de Cloudflare)"
+echo ""
+echo -e "${YELLOW}Nota: Esta instalación usa HTTP sin SSL por simplicidad.${NC}"
+echo -e "${YELLOW}Para producción, configurá SSL manualmente después.${NC}"
 echo ""
