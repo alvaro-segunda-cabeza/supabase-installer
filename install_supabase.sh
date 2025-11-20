@@ -37,15 +37,12 @@ echo -e "${GREEN}Updating system and installing dependencies...${NC}"
 apt-get update && apt-get upgrade -y
 apt-get install -y curl git pwgen openssl sed
 
-# 2. Install Docker if not installed
-if ! command -v docker &> /dev/null; then
-    echo -e "${GREEN}Installing Docker...${NC}"
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
-else
-    echo -e "${BLUE}Docker is already installed.${NC}"
-fi
+# 2. Install/Update Docker
+# We run this unconditionally to ensure we have a recent version compatible with Supabase
+echo -e "${GREEN}Installing/Updating Docker...${NC}"
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+rm get-docker.sh
 
 # 3. Clone Supabase Repository
 INSTALL_DIR="/opt/supabase"
