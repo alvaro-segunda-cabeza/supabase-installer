@@ -13,10 +13,10 @@ Este repositorio contiene un script para instalar automáticamente Supabase (Sel
 Simplemente copia y pega esta línea en tu terminal:
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/TU-USUARIO/supabase-installer/main/install_supabase.sh)
+bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)
 ```
 
-*(Asegúrate de reemplazar `TU-USUARIO` con tu nombre de usuario de GitHub una vez publiques el repositorio).*
+*(Asegúrate de reemplazar `alvaro-segunda-cabeza` con tu nombre de usuario de GitHub una vez publiques el repositorio).*
 
 ## Instalación Manual
 
@@ -29,7 +29,7 @@ Si prefieres ver el script antes de ejecutarlo:
 
 2. Descarga y ejecuta el script:
    ```bash
-   curl -O https://raw.githubusercontent.com/tu-usuario/supabase-installer/main/install_supabase.sh
+   curl -O https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh
    chmod +x install_supabase.sh
    sudo ./install_supabase.sh
    ```
