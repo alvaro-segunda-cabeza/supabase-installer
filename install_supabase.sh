@@ -91,17 +91,14 @@ if [[ "$SETUP_SSL" =~ ^[Yy]$ ]]; then
     if [ ! -z "$DOMAIN" ] && [ ! -z "$EMAIL" ]; then
         echo -e "${GREEN}[5/6] Configuring SSL...${NC}"
         
-        # Create Traefik config (Cloudflare-compatible with HTTP challenge)
+        # Create Traefik config with latest version (v3.x) - Cloudflare compatible
         cat <<EOF > docker-compose.override.yml
-version: "3.8"
-
 services:
   traefik:
-    image: traefik:v2.10
+    image: traefik:latest
     container_name: traefik
     command:
       - "--log.level=INFO"
-      - "--api.dashboard=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
@@ -118,8 +115,6 @@ services:
     volumes:
       - "./letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-    networks:
-      - default
     restart: unless-stopped
 
   studio:
@@ -145,9 +140,11 @@ EOF
         sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.${DOMAIN}|" .env
         
         echo -e "${BLUE}✓ SSL configured for studio.${DOMAIN} and api.${DOMAIN}${NC}"
-        echo -e "${YELLOW}⚠ Make sure DNS records point to this server before continuing!${NC}"
+        echo -e "${YELLOW}⚠ Make sure DNS records point to this server!${NC}"
+        echo -e "   studio.${DOMAIN} → A → $(curl -s ifconfig.me)"
+        echo -e "   api.${DOMAIN}    → A → $(curl -s ifconfig.me)"
         echo ""
-        read -p "Press Enter to continue when DNS is ready..."
+        read -p "Press Enter when DNS is ready..."
     else
         echo -e "${YELLOW}Skipping SSL configuration${NC}"
         SETUP_SSL="n"
@@ -157,19 +154,13 @@ else
 fi
 
 # 6. Start
-echo -e "${GREEN}[6/6] Starting services (this may take a few minutes)...${NC}"
+echo -e "${GREEN}[6/6] Starting services...${NC}"
 docker compose pull -q
 docker compose up -d
 
-# Wait for services to be healthy
+# Wait for services
 echo -e "${BLUE}Waiting for services to start...${NC}"
-sleep 10
-
-# Check if services are running
-RUNNING=$(docker ps --filter "name=supabase" --format "{{.Names}}" | wc -l)
-if [ "$RUNNING" -lt 5 ]; then
-    echo -e "${RED}Warning: Some services may not have started. Check logs with: docker compose logs${NC}"
-fi
+sleep 15
 
 echo ""
 echo -e "${GREEN}✓ Installation complete!${NC}"
@@ -183,8 +174,10 @@ if [[ "$SETUP_SSL" =~ ^[Yy]$ ]] && [ ! -z "$DOMAIN" ]; then
     echo -e "   Studio: ${GREEN}https://studio.${DOMAIN}${NC}"
     echo -e "   API:    ${GREEN}https://api.${DOMAIN}${NC}"
     echo ""
-    echo -e "${YELLOW}⏳ SSL certificates may take 1-2 minutes to generate.${NC}"
-    echo -e "${YELLOW}   If you see 'not secure', wait a moment and refresh.${NC}"
+    echo -e "${YELLOW}⏳ SSL certificates take 1-2 minutes to generate.${NC}"
+    echo -e "${YELLOW}   If you see 'not secure', wait and refresh.${NC}"
+    echo ""
+    echo -e "${BLUE}Cloudflare users: Set SSL/TLS mode to 'Full' (not Flexible)${NC}"
 else
     echo -e "${BLUE}📍 Access URLs:${NC}"
     echo -e "   Studio: ${GREEN}http://${SERVER_IP}:3000${NC}"
@@ -192,10 +185,10 @@ else
 fi
 
 echo ""
-echo -e "${BLUE}🔑 Credentials saved in:${NC} /opt/supabase/docker/.env"
+echo -e "${BLUE}🔑 Credentials:${NC} /opt/supabase/docker/.env"
 echo ""
 echo -e "${BLUE}📋 Useful commands:${NC}"
-echo -e "   Check status:  ${GREEN}docker ps${NC}"
-echo -e "   View logs:     ${GREEN}cd /opt/supabase/docker && docker compose logs -f${NC}"
-echo -e "   Restart:       ${GREEN}cd /opt/supabase/docker && docker compose restart${NC}"
+echo -e "   Status:  ${GREEN}docker ps${NC}"
+echo -e "   Logs:    ${GREEN}cd /opt/supabase/docker && docker compose logs -f traefik${NC}"
+echo -e "   Restart: ${GREEN}cd /opt/supabase/docker && docker compose restart${NC}"
 echo ""
