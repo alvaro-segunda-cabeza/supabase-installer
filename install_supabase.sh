@@ -1,15 +1,15 @@
 #!/bin/bash
 
 # Supabase Self-Hosting Installer Script
-# This script installs Docker, clones Supabase, configures secrets (generating valid JWTs), and starts the services.
+# Simple, secure, and Cloudflare-ready
 
 set -e
 
-# Colors for output
+# Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Function to generate JWT (HS256) using openssl
 generate_jwt() {
@@ -24,165 +24,129 @@ generate_jwt() {
     echo "${header_b64}.${payload_b64}.${signature}"
 }
 
-echo -e "${BLUE}Starting Supabase Installation...${NC}"
+echo -e "${BLUE}=== Supabase Installer ===${NC}"
+echo ""
 
-# Check if running as root
+# Check root
 if [ "$EUID" -ne 0 ]; then 
-  echo -e "${RED}Please run as root (sudo ./install_supabase.sh)${NC}"
+  echo -e "${RED}Error: Run as root (use sudo)${NC}"
   exit 1
 fi
 
-# 1. Update System and Install Dependencies
-echo -e "${GREEN}Updating system and installing dependencies...${NC}"
-apt-get update && apt-get upgrade -y
-apt-get install -y curl git pwgen openssl sed
+# 1. Update & Install Dependencies
+echo -e "${GREEN}[1/5] Updating system...${NC}"
+apt-get update -qq && apt-get upgrade -y -qq
+apt-get install -y -qq curl git openssl
 
-# 2. Install/Update Docker
-# We run this unconditionally to ensure we have a recent version compatible with Supabase
-echo -e "${GREEN}Installing/Updating Docker...${NC}"
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-rm get-docker.sh
+# 2. Install Docker
+echo -e "${GREEN}[2/5] Installing Docker...${NC}"
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
+fi
 
-# 3. Clone Supabase Repository
+# 3. Clone Supabase
+echo -e "${GREEN}[3/5] Downloading Supabase...${NC}"
 INSTALL_DIR="/opt/supabase"
 if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${BLUE}Supabase directory already exists at $INSTALL_DIR. Skipping clone.${NC}"
-else
-    echo -e "${GREEN}Cloning Supabase repository to $INSTALL_DIR...${NC}"
-    git clone --depth 1 https://github.com/supabase/supabase "$INSTALL_DIR"
+    rm -rf "$INSTALL_DIR"
 fi
+git clone --depth 1 https://github.com/supabase/supabase "$INSTALL_DIR" > /dev/null 2>&1
 
-# 4. Configure Environment Variables
-echo -e "${GREEN}Configuring environment variables...${NC}"
+# 4. Generate Secrets
+echo -e "${GREEN}[4/5] Generating secure keys...${NC}"
 cd "$INSTALL_DIR/docker"
+cp .env.example .env
 
-# Copy example env if .env doesn't exist
-if [ ! -f .env ]; then
-    cp .env.example .env
-    
-    # Generate Secrets
-    echo -e "${BLUE}Generating secure keys...${NC}"
-    
-    # Generate a random DB password
-    DB_PASSWORD=$(openssl rand -base64 12)
-    
-    # Generate JWT Secret
-    JWT_SECRET=$(openssl rand -hex 32)
-    
-    # Generate JWT Tokens
-    echo -e "${BLUE}Calculating new ANON and SERVICE_ROLE keys...${NC}"
-    
-    # Timestamps
-    IAT=$(date +%s)
-    EXP=$((IAT + 315360000)) # +10 years
-    
-    # Anon Payload
-    ANON_PAYLOAD="{\"role\":\"anon\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
-    ANON_KEY=$(generate_jwt "$ANON_PAYLOAD" "$JWT_SECRET")
-    
-    # Service Role Payload
-    SERVICE_PAYLOAD="{\"role\":\"service_role\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
-    SERVICE_KEY=$(generate_jwt "$SERVICE_PAYLOAD" "$JWT_SECRET")
-    
-    # Update .env file safely
-    # We use a temporary file to avoid issues with sed on different systems
-    
-    sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
-    sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env
-    sed -i "s|ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
-    sed -i "s|SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_KEY|" .env
-    
-    echo -e "${BLUE}Keys updated successfully.${NC}"
-    echo -e "${BLUE}Database Password: $DB_PASSWORD${NC}"
-else
-    echo -e "${BLUE}.env file already exists. Skipping configuration.${NC}"
-fi
+DB_PASSWORD=$(openssl rand -base64 12)
+JWT_SECRET=$(openssl rand -hex 32)
 
-# 5. Configure Traefik / SSL (Optional)
-echo -e "${BLUE}---------------------------------------------------${NC}"
-read -p "Do you want to set up SSL (HTTPS) with Traefik? (y/n): " SETUP_SSL
+IAT=$(date +%s)
+EXP=$((IAT + 315360000))
+
+ANON_PAYLOAD="{\"role\":\"anon\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
+ANON_KEY=$(generate_jwt "$ANON_PAYLOAD" "$JWT_SECRET")
+
+SERVICE_PAYLOAD="{\"role\":\"service_role\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
+SERVICE_KEY=$(generate_jwt "$SERVICE_PAYLOAD" "$JWT_SECRET")
+
+sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
+sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env
+sed -i "s|ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
+sed -i "s|SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_KEY|" .env
+
+# Ask for SSL
+echo ""
+read -p "Configure SSL with domain? (y/n): " SETUP_SSL
 
 if [[ "$SETUP_SSL" =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}Configuring Traefik and SSL...${NC}"
+    read -p "Domain (e.g., example.com): " DOMAIN
+    read -p "Email: " EMAIL
     
-    read -p "Enter your base domain (e.g., mydomain.com): " DOMAIN_NAME
-    read -p "Enter your email for Let's Encrypt (e.g., admin@mydomain.com): " SSL_EMAIL
-    
-    if [ -z "$DOMAIN_NAME" ] || [ -z "$SSL_EMAIL" ]; then
-        echo -e "${RED}Domain and Email are required for SSL setup. Skipping SSL.${NC}"
-    else
-        # Create docker-compose.override.yml
-        echo -e "${BLUE}Creating docker-compose.override.yml...${NC}"
-        
+    if [ ! -z "$DOMAIN" ] && [ ! -z "$EMAIL" ]; then
+        # Create Traefik config (Cloudflare-compatible)
         cat <<EOF > docker-compose.override.yml
 services:
   traefik:
     image: traefik:v2.10
     container_name: traefik
     command:
-      - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.email=${SSL_EMAIL}"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
     ports:
       - "80:80"
       - "443:443"
-      # - "8080:8080" # Dashboard (optional, insecure)
     volumes:
       - "./letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-    restart: always
+    restart: unless-stopped
 
   studio:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\`studio.${DOMAIN_NAME}\`)"
+      - "traefik.http.routers.studio.rule=Host(\`studio.${DOMAIN}\`)"
       - "traefik.http.routers.studio.entrypoints=websecure"
-      - "traefik.http.routers.studio.tls.certresolver=myresolver"
+      - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
 
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(\`api.${DOMAIN_NAME}\`)"
+      - "traefik.http.routers.api.rule=Host(\`api.${DOMAIN}\`)"
       - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
 EOF
         
-        # Update API URL in .env to use the new domain
-        echo -e "${BLUE}Updating API URLs in .env to https://api.${DOMAIN_NAME}...${NC}"
-        sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.${DOMAIN_NAME}|" .env
-        sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.${DOMAIN_NAME}|" .env
+        sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.${DOMAIN}|" .env
+        sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.${DOMAIN}|" .env
         
-        echo -e "${GREEN}SSL Configuration prepared!${NC}"
-        echo -e "${RED}IMPORTANT: Ensure your DNS records (A records) for studio.${DOMAIN_NAME} and api.${DOMAIN_NAME} point to this server IP before starting.${NC}"
+        echo -e "${BLUE}SSL configured for studio.${DOMAIN} and api.${DOMAIN}${NC}"
     fi
 fi
 
-# 6. Start Supabase
-echo -e "${GREEN}Starting Supabase services...${NC}"
-# Ensure we are in the right directory
-cd "$INSTALL_DIR/docker"
-
-docker compose pull
+# 5. Start
+echo -e "${GREEN}[5/5] Starting services...${NC}"
+docker compose pull -q
 docker compose up -d
 
-echo -e "${GREEN}Supabase installed and running!${NC}"
-echo -e "${BLUE}---------------------------------------------------${NC}"
-if [[ "$SETUP_SSL" =~ ^[Yy]$ ]] && [ ! -z "$DOMAIN_NAME" ]; then
-    echo -e "${BLUE}Supabase Studio: https://studio.${DOMAIN_NAME}${NC}"
-    echo -e "${BLUE}API Gateway:     https://api.${DOMAIN_NAME}${NC}"
+echo ""
+echo -e "${GREEN}✓ Installation complete!${NC}"
+echo ""
+if [[ "$SETUP_SSL" =~ ^[Yy]$ ]] && [ ! -z "$DOMAIN" ]; then
+    echo -e "${BLUE}Studio: https://studio.${DOMAIN}${NC}"
+    echo -e "${BLUE}API:    https://api.${DOMAIN}${NC}"
 else
-    echo -e "${BLUE}Supabase Studio: http://<YOUR_SERVER_IP>:8000${NC}" # Note: Default might be 3000 depending on setup, but Kong proxies it often.
-    echo -e "${BLUE}API Gateway:     http://<YOUR_SERVER_IP>:8000${NC}"
+    SERVER_IP=$(curl -s ifconfig.me)
+    echo -e "${BLUE}Studio: http://${SERVER_IP}:3000${NC}"
+    echo -e "${BLUE}API:    http://${SERVER_IP}:8000${NC}"
 fi
-echo -e "${BLUE}---------------------------------------------------${NC}"
-echo -e "${BLUE}Your credentials are stored in: $INSTALL_DIR/docker/.env${NC}"
+echo ""
+echo -e "Credentials: ${INSTALL_DIR}/docker/.env"

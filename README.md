@@ -1,169 +1,68 @@
-# Supabase VPS Installer
+# Supabase Installer
 
-Este repositorio contiene un script para instalar automáticamente Supabase (Self-Hosted) en un servidor Linux (Ubuntu/Debian recomendado), como un VPS de Hetzner, DigitalOcean o AWS.
+Instala Supabase completo (con SSL y Traefik) en tu VPS con un solo comando.
 
-## Requisitos
-
-- Un servidor VPS con Linux (Ubuntu 20.04/22.04 recomendado).
-- Acceso root o usuario con privilegios sudo.
-- Al menos 4GB de RAM (recomendado para correr todos los servicios de Supabase).
-
-## Instalación Rápida (One-Line)
-
-Simplemente copia y pega esta línea en tu terminal:
+## Instalación
 
 ```bash
 bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)
 ```
 
-*(Asegúrate de reemplazar `alvaro-segunda-cabeza` con tu nombre de usuario de GitHub una vez publiques el repositorio).*
+### ¿Qué incluye?
 
-## Instalación Manual
+- ✅ Docker y todas las dependencias
+- ✅ Supabase (PostgreSQL, Auth, Storage, Realtime, etc.)
+- ✅ Claves de seguridad generadas automáticamente
+- ✅ SSL/HTTPS con Let's Encrypt (opcional)
+- ✅ Compatible con Cloudflare (proxy naranja activado)
 
-Si prefieres ver el script antes de ejecutarlo:
+## Requisitos
 
-1. Conéctate a tu servidor vía SSH:
-   ```bash
-   ssh root@tu-ip-servidor
-   ```
+- VPS con Ubuntu/Debian
+- 4GB RAM mínimo
+- Acceso root o sudo
 
-2. Descarga y ejecuta el script:
-   ```bash
-   curl -O https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh
-   chmod +x install_supabase.sh
-   sudo ./install_supabase.sh
-   ```
+## Configuración DNS
 
-## ¿Qué hace el script?
+Si eliges usar SSL, configura estos registros en tu proveedor de DNS:
 
-1. **Actualiza el sistema**: Ejecuta `apt-get update` y `upgrade`.
-2. **Instala Docker**: Si no está instalado, descarga e instala la última versión.
-3. **Clona Supabase**: Descarga el repositorio oficial en `/opt/supabase`.
-4. **Configura Seguridad Automáticamente**:
-   - Genera una contraseña aleatoria para la base de datos.
-   - Genera un nuevo `JWT_SECRET` aleatorio.
-   - **Calcula y firma** nuevas `ANON_KEY` y `SERVICE_ROLE_KEY` válidas usando el nuevo secreto (esto es crítico para que funcione).
-   - Guarda todo en `/opt/supabase/docker/.env`.
-5. **Configura SSL / Traefik (Opcional)**:
-   - Te pregunta si quieres usar HTTPS.
-   - Si dices que sí, te pide tu dominio (ej. `midominio.com`) y email.
-   - Configura **Traefik** automáticamente para manejar certificados SSL (Let's Encrypt).
-   - Configura los subdominios `studio.midominio.com` y `api.midominio.com`.
-6. **Inicia los Servicios**: Levanta los contenedores con Docker Compose.
+```
+studio.tudominio.com  →  A  →  IP_DE_TU_VPS
+api.tudominio.com     →  A  →  IP_DE_TU_VPS
+```
 
-## Requisitos DNS (Si usas SSL)
-
-Si eliges instalar SSL, asegúrate de configurar los registros DNS en tu proveedor de dominio (Cloudflare, Namecheap, etc.) apuntando a la IP de tu VPS:
-
-- `studio.tudominio.com` -> `A Record` -> `TU_IP_VPS`
-- `api.tudominio.com`    -> `A Record` -> `TU_IP_VPS`
+**Con Cloudflare:** Puedes usar el proxy (rayito naranja 🟠) sin problemas. El script está configurado para funcionar con él. Solo asegúrate de poner SSL en modo **"Full"** en Cloudflare → SSL/TLS.
 
 ## Acceso
 
-Una vez finalizado:
+Una vez instalado:
 
-**Si configuraste SSL:**
-- **Supabase Studio**: `https://studio.tudominio.com`
-- **API URL**: `https://api.tudominio.com`
+- **Studio (Dashboard):** `https://studio.tudominio.com` (o `http://IP:3000` sin SSL)
+- **API:** `https://api.tudominio.com` (o `http://IP:8000` sin SSL)
 
-**Si NO configuraste SSL:**
-- **Supabase Studio**: `http://tu-ip-servidor:8000` (o puerto 3000 según config)
-- **API URL**: `http://tu-ip-servidor:8000`
-
-Para ver tus claves generadas (necesarias para conectar tu frontend):
+Para ver tus claves API:
 ```bash
 cat /opt/supabase/docker/.env
 ```
-Busca `ANON_KEY` y `SERVICE_ROLE_KEY`.
 
-## Solución de Problemas (Troubleshooting)
+## Solución de problemas
 
-Si algo no funciona o tus dominios dan error, ejecuta estos comandos en tu servidor para diagnosticar:
+**Si algo no funciona:**
 
-### 0. Error 404 Page Not Found
-Si ves un "404 page not found" al acceder a tu dominio o IP:
+1. Verifica que los contenedores estén corriendo:
+   ```bash
+   docker ps
+   ```
 
-**Verifica que los contenedores estén corriendo:**
-```bash
-docker ps
-```
+2. Revisa los logs:
+   ```bash
+   docker logs traefik
+   docker logs supabase-kong
+   ```
 
-**Si Traefik está corriendo pero da 404, revisa sus logs:**
-```bash
-docker logs traefik
-```
-
-**Prueba acceder directamente a Kong (API Gateway) sin pasar por Traefik:**
-```bash
-curl -I http://localhost:8000
-```
-
-Si esto responde bien pero tu dominio no, el problema es de DNS o configuración de Traefik.
-
-### 1. Verificar que los contenedores están corriendo
-```bash
-docker ps
-```
-Deberías ver una lista de contenedores (supabase-studio, supabase-kong, traefik, etc.) con estado "Up". Si alguno dice "Restarting" o no aparece, hay un error.
-
-### 2. Ver logs de Traefik (Problemas de SSL)
-Si tus dominios no cargan o dan error de certificado, revisa los logs de Traefik:
-```bash
-docker logs traefik
-```
-Busca errores en rojo relacionados con "acme" o "letsencrypt". Común: errores de validación DNS si los registros A no apuntaban a la IP antes de instalar.
-
-### 3. Verificar si Supabase responde localmente
-Intenta conectar desde dentro del servidor para descartar problemas de firewall:
-```bash
-curl -I http://localhost:8000
-```
-Deberías recibir un `HTTP/1.1 200 OK` (o 404, pero respuesta al fin).
-
-### 4. Reiniciar todo
-A veces un reinicio limpio soluciona problemas de configuración:
-```bash
-cd /opt/supabase/docker
-docker compose down
-docker compose up -d
-```
-
-## Usando Cloudflare con Proxy (Rayito Naranja) 🟠
-
-Si usas Cloudflare con el proxy activado (rayito naranja), **debes cambiar el modo de validación SSL** de Traefik.
-
-El problema es que Cloudflare hace que Let's Encrypt no pueda validar tu dominio directamente (el "TLS Challenge" falla). La solución es usar el **HTTP Challenge** en lugar del TLS Challenge.
-
-### Configuración para Cloudflare
-
-Después de instalar, entra a tu servidor y modifica el archivo de configuración:
-
-```bash
-cd /opt/supabase/docker
-nano docker-compose.override.yml
-```
-
-Busca la línea:
-```yaml
-- "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-```
-
-Y reemplázala por:
-```yaml
-- "--certificatesresolvers.myresolver.acme.httpchallenge=true"
-- "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
-```
-
-Guarda (Ctrl+O, Enter, Ctrl+X) y reinicia:
-```bash
-docker compose down
-docker compose up -d
-```
-
-### Configuración SSL en Cloudflare
-
-En el panel de Cloudflare, ve a **SSL/TLS** → **Overview** y selecciona:
-- **"Full (strict)"** si Traefik generó los certificados correctamente.
-- **"Full"** si tienes problemas (menos seguro pero funciona).
-
-**Nunca uses "Flexible"** o tendrás loops infinitos.
+3. Reinicia:
+   ```bash
+   cd /opt/supabase/docker
+   docker compose down
+   docker compose up -d
+   ```
