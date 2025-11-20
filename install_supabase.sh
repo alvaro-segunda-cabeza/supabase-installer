@@ -215,11 +215,9 @@ fi
 
 # 9. Crear docker-compose.override.yml para Traefik
 cat > docker-compose.override.yml << 'OVERRIDE_EOF'
-version: "3.8"
-
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v2.11
     container_name: traefik
     restart: unless-stopped
     command:
