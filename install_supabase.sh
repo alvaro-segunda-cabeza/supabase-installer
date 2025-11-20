@@ -17,8 +17,26 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # 1. Recopilar información
-read -p "Introduce tu dominio base (ej. mi-supabase.com): " DOMAIN
-read -p "Introduce tu email para Let's Encrypt: " EMAIL
+if [ -t 0 ]; then
+    # Ejecución normal (interactiva)
+    read -p "Introduce tu dominio base (ej. mi-supabase.com): " DOMAIN
+    read -p "Introduce tu email para Let's Encrypt: " EMAIL
+else
+    # Ejecución via pipe (curl | bash)
+    # Intentamos leer directamente del terminal del usuario
+    if [ -c /dev/tty ]; then
+        echo -e "${YELLOW}Detectada ejecución via pipe. Leyendo inputs desde /dev/tty...${NC}"
+        echo -n "Introduce tu dominio base (ej. mi-supabase.com): "
+        read DOMAIN < /dev/tty
+        echo -n "Introduce tu email para Let's Encrypt: "
+        read EMAIL < /dev/tty
+    else
+        echo -e "${RED}Error: No se puede detectar un terminal interactivo.${NC}"
+        echo -e "${YELLOW}Por favor, intenta ejecutarlo así:${NC}"
+        echo -e "bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)"
+        exit 1
+    fi
+fi
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Dominio y Email son requeridos.${NC}"
