@@ -34,6 +34,9 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Move to a safe directory first
+cd /root 2>/dev/null || cd /tmp
+
 # 1. Update & Install Dependencies
 echo -e "${GREEN}[1/6] Updating system...${NC}"
 export DEBIAN_FRONTEND=noninteractive
@@ -56,7 +59,7 @@ if [ -d "$INSTALL_DIR" ]; then
     # Force kill any stuck containers first
     docker ps -a | grep -E "supabase|traefik|kong" | awk '{print $1}' | xargs -r docker rm -f 2>/dev/null || true
     cd "$INSTALL_DIR/docker" 2>/dev/null && timeout 30 docker compose down 2>/dev/null || true
-    cd /
+    cd /root
     rm -rf "$INSTALL_DIR"
     echo -e "${BLUE}  ✓ Cleaned up old installation${NC}"
 fi
