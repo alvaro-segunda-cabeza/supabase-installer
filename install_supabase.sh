@@ -213,79 +213,172 @@ if [ -f "docker-compose.yml" ]; then
     sed -i '/volumes:/,/^[^ ]/ s|^[[:space:]]*- :[^:]*:|      - /var/run/docker.sock:|g' docker-compose.yml
 fi
 
-# 9. Crear docker-compose.override.yml para Traefik
+# 9. Crear docker-compose.override.yml con Nginx en lugar de Traefik
 cat > docker-compose.override.yml << 'OVERRIDE_EOF'
 services:
-  traefik:
-    image: traefik:v2.11
-    container_name: traefik
+  nginx:
+    image: nginx:alpine
+    container_name: supabase-nginx
     restart: unless-stopped
-    command:
-      - "--api.insecure=false"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=EMAILPLACEHOLDER"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--log.level=INFO"
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - "./letsencrypt:/letsencrypt"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
     networks:
       - default
+    depends_on:
+      - studio
+      - kong
 
-  studio:
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(DOMAINSTUDIO)"
-      - "traefik.http.routers.studio.entrypoints=websecure"
-      - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
-      - "traefik.http.services.studio.loadbalancer.server.port=3000"
-      - "traefik.http.routers.studio.middlewares=studio-auth,https-redirect"
-      - "traefik.http.middlewares.studio-auth.basicauth.users=BASICAUTHPLACEHOLDER"
-      - "traefik.http.routers.studio-http.rule=Host(DOMAINSTUDIO)"
-      - "traefik.http.routers.studio-http.entrypoints=web"
-      - "traefik.http.routers.studio-http.middlewares=https-redirect"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
-
-  kong:
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(DOMAINAPI)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.api.loadbalancer.server.port=8000"
-      - "traefik.http.routers.api-http.rule=Host(DOMAINAPI)"
-      - "traefik.http.routers.api-http.entrypoints=web"
-      - "traefik.http.routers.api-http.middlewares=https-redirect"
-
-  vector:
+  certbot:
+    image: certbot/certbot
+    container_name: supabase-certbot
     volumes:
-      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 OVERRIDE_EOF
 
-# Reemplazar placeholders usando sed de forma segura
-sed -i "s|EMAILPLACEHOLDER|$EMAIL|g" docker-compose.override.yml
-sed -i "s|DOMAINSTUDIO|\`studio.$DOMAIN\`|g" docker-compose.override.yml
-sed -i "s|DOMAINAPI|\`api.$DOMAIN\`|g" docker-compose.override.yml
-sed -i "s|BASICAUTHPLACEHOLDER|$BASIC_AUTH_HASH|g" docker-compose.override.yml
+# Crear directorio para nginx
+mkdir -p nginx/conf.d certbot/conf certbot/www
+
+# Crear configuración principal de nginx
+cat > nginx/nginx.conf << 'NGINX_MAIN'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+    
+    access_log /var/log/nginx/access.log main;
+    
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 50M;
+    
+    include /etc/nginx/conf.d/*.conf;
+}
+NGINX_MAIN
+
+# Crear configuración HTTP inicial (para obtener certificados)
+cat > nginx/conf.d/supabase.conf << NGINX_CONF
+# Redirección HTTP a HTTPS
+server {
+    listen 80;
+    server_name studio.$DOMAIN api.$DOMAIN;
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# Studio HTTPS
+server {
+    listen 443 ssl http2;
+    server_name studio.$DOMAIN;
+    
+    # Certificados SSL (se generarán después)
+    ssl_certificate /etc/letsencrypt/live/studio.$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/studio.$DOMAIN/privkey.pem;
+    
+    # Configuración SSL moderna
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    
+    # Autenticación básica
+    auth_basic "Supabase Studio";
+    auth_basic_user_file /etc/nginx/conf.d/.htpasswd;
+    
+    location / {
+        proxy_pass http://studio:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+
+# API HTTPS
+server {
+    listen 443 ssl http2;
+    server_name api.$DOMAIN;
+    
+    # Certificados SSL (se generarán después)
+    ssl_certificate /etc/letsencrypt/live/api.$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.$DOMAIN/privkey.pem;
+    
+    # Configuración SSL moderna
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    
+    location / {
+        proxy_pass http://kong:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+NGINX_CONF
+
+# Crear archivo .htpasswd para autenticación básica
+echo "$BASIC_AUTH_HASH" | sed 's/\$\$/\$/g' > nginx/conf.d/.htpasswd
 
 mkdir -p letsencrypt volumes/logs
-touch letsencrypt/acme.json
-chmod 600 letsencrypt/acme.json
 
 # 10. Iniciar servicios
 docker compose up -d > /dev/null 2>&1
 
-sleep 60
+sleep 30
+
+# Generar certificados SSL con certbot
+echo -e "${CYAN}Generando certificados SSL...${NC}"
+docker compose run --rm certbot certonly --webroot --webroot-path=/var/www/certbot \
+  --email $EMAIL --agree-tos --no-eff-email \
+  -d studio.$DOMAIN -d api.$DOMAIN > /dev/null 2>&1
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓ Certificados SSL generados${NC}"
+    # Reiniciar nginx para cargar los certificados
+    docker compose restart nginx > /dev/null 2>&1
+else
+    echo -e "${YELLOW}⚠ No se pudieron generar certificados SSL automáticamente${NC}"
+    echo -e "${YELLOW}  Verifica que los DNS estén configurados correctamente${NC}"
+fi
+
+sleep 30
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
@@ -294,12 +387,12 @@ echo -e "${CYAN}Verificando servicios...${NC}"
 sleep 30
 
 # Verificar contenedores críticos
-TRAEFIK_RUNNING=$(docker ps --filter "name=traefik" --format "{{.Names}}" 2>/dev/null)
+NGINX_RUNNING=$(docker ps --filter "name=supabase-nginx" --format "{{.Names}}" 2>/dev/null)
 DB_RUNNING=$(docker ps --filter "name=supabase-db" --format "{{.Names}}" 2>/dev/null)
 STUDIO_RUNNING=$(docker ps --filter "name=supabase-studio" --format "{{.Names}}" 2>/dev/null)
 KONG_RUNNING=$(docker ps --filter "name=supabase-kong" --format "{{.Names}}" 2>/dev/null)
 
-if [ -z "$TRAEFIK_RUNNING" ] || [ -z "$DB_RUNNING" ] || [ -z "$STUDIO_RUNNING" ] || [ -z "$KONG_RUNNING" ]; then
+if [ -z "$NGINX_RUNNING" ] || [ -z "$DB_RUNNING" ] || [ -z "$STUDIO_RUNNING" ] || [ -z "$KONG_RUNNING" ]; then
     echo -e "${RED}Algunos servicios no iniciaron correctamente.${NC}"
     echo -e "${YELLOW}Mostrando logs de los últimos servicios:${NC}"
     echo ""
