@@ -21,21 +21,29 @@ Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente
 
 ## Instalación Rápida
 
-Ejecuta el siguiente comando en tu servidor:
+### Opción 1: Con argumentos (Recomendado)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/TU_USUARIO/supabase-installer/main/install_supabase.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash -s midominio.com admin@midominio.com
 ```
 
-*(Reemplaza `TU_USUARIO` con tu usuario de GitHub una vez hagas fork/push de este repo)*
+Reemplaza `midominio.com` con tu dominio y `admin@midominio.com` con tu email.
 
-O clona y ejecuta manualmente:
+### Opción 2: Interactiva
 
 ```bash
-git clone https://github.com/TU_USUARIO/supabase-installer.git
+curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh | sudo bash
+```
+
+El script te pedirá el dominio y email si no los proporcionas.
+
+### Opción 3: Clonando el repositorio
+
+```bash
+git clone https://github.com/alvaro-segunda-cabeza/supabase-installer.git
 cd supabase-installer
 chmod +x install_supabase.sh
-sudo ./install_supabase.sh
+sudo ./install_supabase.sh midominio.com admin@midominio.com
 ```
 
 ## Durante la instalación

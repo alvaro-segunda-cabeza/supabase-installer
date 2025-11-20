@@ -9,6 +9,7 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}=== Instalador Profesional de Supabase con Traefik y SSL ===${NC}"
 echo -e "${YELLOW}Este script instalará Docker, Supabase y configurará Traefik con SSL automático.${NC}"
 echo -e "${YELLOW}Requisitos: Ubuntu/Debian, Dominio apuntando a este servidor (Cloudflare Proxy OK).${NC}"
+echo ""
 
 # Verificar si se ejecuta como root
 if [ "$EUID" -ne 0 ]; then 
@@ -16,30 +17,27 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Recopilar información
-if [ -t 0 ]; then
-    # Ejecución normal (interactiva)
-    read -p "Introduce tu dominio base (ej. mi-supabase.com): " DOMAIN
-    read -p "Introduce tu email para Let's Encrypt: " EMAIL
-else
-    # Ejecución via pipe (curl | bash)
-    # Intentamos leer directamente del terminal del usuario
-    if [ -c /dev/tty ]; then
-        echo -e "${YELLOW}Detectada ejecución via pipe. Leyendo inputs desde /dev/tty...${NC}"
-        echo -n "Introduce tu dominio base (ej. mi-supabase.com): "
-        read DOMAIN < /dev/tty
-        echo -n "Introduce tu email para Let's Encrypt: "
-        read EMAIL < /dev/tty
-    else
-        echo -e "${RED}Error: No se puede detectar un terminal interactivo.${NC}"
-        echo -e "${YELLOW}Por favor, intenta ejecutarlo así:${NC}"
-        echo -e "bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)"
-        exit 1
+# 1. Recopilar información desde argumentos o interactivamente
+DOMAIN="$1"
+EMAIL="$2"
+
+if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
+    echo -e "${YELLOW}Uso: $0 <dominio> <email>${NC}"
+    echo -e "${YELLOW}Ejemplo: $0 midominio.com admin@midominio.com${NC}"
+    echo ""
+    echo -e "${YELLOW}O proporciona los datos ahora:${NC}"
+    
+    if [ -z "$DOMAIN" ]; then
+        read -p "Introduce tu dominio base (ej. mi-supabase.com): " DOMAIN </dev/tty
+    fi
+    
+    if [ -z "$EMAIL" ]; then
+        read -p "Introduce tu email para Let's Encrypt: " EMAIL </dev/tty
     fi
 fi
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
-    echo -e "${RED}Dominio y Email son requeridos.${NC}"
+    echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
     exit 1
 fi
 
@@ -48,8 +46,9 @@ echo -e "Dominio: ${YELLOW}$DOMAIN${NC}"
 echo -e "Email: ${YELLOW}$EMAIL${NC}"
 echo -e "Studio será accesible en: ${YELLOW}studio.$DOMAIN${NC}"
 echo -e "API será accesible en: ${YELLOW}api.$DOMAIN${NC}"
+echo ""
 
-sleep 3
+sleep 2
 
 # 2. Actualizar sistema e instalar dependencias básicas
 echo -e "${GREEN}Actualizando sistema...${NC}"
