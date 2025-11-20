@@ -153,10 +153,13 @@ EOF
         sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.${DOMAIN}|" .env
         sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.${DOMAIN}|" .env
         
+        # Get IPv4 address specifically
+        SERVER_IPV4=$(curl -4 -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+        
         echo -e "${BLUE}✓ SSL configured for studio.${DOMAIN} and api.${DOMAIN}${NC}"
         echo -e "${YELLOW}⚠ Make sure DNS records point to this server!${NC}"
-        echo -e "   studio.${DOMAIN} → A → $(curl -s ifconfig.me)"
-        echo -e "   api.${DOMAIN}    → A → $(curl -s ifconfig.me)"
+        echo -e "   studio.${DOMAIN} → A → ${SERVER_IPV4}"
+        echo -e "   api.${DOMAIN}    → A → ${SERVER_IPV4}"
         echo ""
         read -p "Press Enter when DNS is ready..."
     else
@@ -181,7 +184,7 @@ echo -e "${GREEN}✓ Installation complete!${NC}"
 echo ""
 
 # Get server IP
-SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
+SERVER_IP=$(curl -4 -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
 
 if [[ "$SETUP_SSL" =~ ^[Yy]$ ]] && [ ! -z "$DOMAIN" ]; then
     echo -e "${BLUE}📍 Access URLs:${NC}"
