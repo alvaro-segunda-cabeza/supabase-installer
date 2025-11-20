@@ -42,7 +42,8 @@ sleep 3
 
 # 2. Actualizar sistema e instalar dependencias básicas
 echo -e "${GREEN}Actualizando sistema...${NC}"
-apt-get update && apt-get upgrade -y
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
 apt-get install -y curl git wget sudo apache2-utils
 
 # 3. Instalar Docker y Docker Compose
@@ -54,6 +55,10 @@ if ! command -v docker &> /dev/null; then
 else
     echo -e "${GREEN}Docker ya está instalado.${NC}"
 fi
+
+# Asegurarse de que Docker está corriendo
+systemctl enable docker
+systemctl start docker
 
 # 4. Preparar directorio de Supabase
 INSTALL_DIR="/opt/supabase"
@@ -85,23 +90,20 @@ generate_secret() {
 
 POSTGRES_PASSWORD=$(generate_secret)
 JWT_SECRET=$(generate_secret)
-ANON_KEY=$(generate_secret) # Nota: En prod real deberías generar JWTs válidos firmados con el secreto
+ANON_KEY=$(generate_secret)
 SERVICE_KEY=$(generate_secret)
 DASHBOARD_USERNAME="admin"
 DASHBOARD_PASSWORD=$(generate_secret)
 
 echo -e "${GREEN}Generando autenticación básica para el Dashboard...${NC}"
 # Generar hash para Traefik Basic Auth
-# htpasswd -nb user password -> user:hash
 BASIC_AUTH_USER="$DASHBOARD_USERNAME"
 BASIC_AUTH_PASS="$DASHBOARD_PASSWORD"
-BASIC_AUTH_HASH=$(htpasswd -nb $BASIC_AUTH_USER $BASIC_AUTH_PASS)
+BASIC_AUTH_HASH=$(htpasswd -nB $BASIC_AUTH_USER $BASIC_AUTH_PASS | sed 's/\$/\$\$/g')
 
 # Actualizar .env con sed
 sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" .env
 sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|g" .env
-sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" .env
-echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env.local # Backup de la pass
 
 # Configurar URLs externas
 sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.$DOMAIN|g" .env
@@ -109,27 +111,40 @@ sed -i "s|SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.$DOMAIN|g" .env
 sed -i "s|STUDIO_DEFAULT_ORGANIZATION=.*|STUDIO_DEFAULT_ORGANIZATION=Supabase|g" .env
 sed -i "s|STUDIO_DEFAULT_PROJECT=.*|STUDIO_DEFAULT_PROJECT=Supabase|g" .env
 
+# Guardar credenciales
+cat > /root/supabase_credentials.txt <<CREDS
+=== CREDENCIALES DE SUPABASE ===
+Dominio: $DOMAIN
+Postgres Password: $POSTGRES_PASSWORD
+Dashboard User: $DASHBOARD_USERNAME
+Dashboard Pass: $DASHBOARD_PASSWORD
+Dashboard URL: https://studio.$DOMAIN
+API URL: https://api.$DOMAIN
+=================================
+CREDS
+
 # 6. Crear docker-compose.override.yml para Traefik
 echo -e "${GREEN}Configurando Traefik y SSL...${NC}"
 
-cat <<EOF > docker-compose.override.yml
+cat <<'EOF' > docker-compose.override.yml
 version: "3.8"
 
 services:
   traefik:
     image: traefik:v2.10
     container_name: traefik
+    restart: unless-stopped
     command:
-      - "--api.insecure=true"
+      - "--api.insecure=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      # Usamos HTTP Challenge para mejor compatibilidad con Cloudflare
-      - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
-      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.myresolver.acme.email=$EMAIL"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=EMAIL_PLACEHOLDER"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
     ports:
       - "80:80"
       - "443:443"
@@ -137,53 +152,77 @@ services:
       - "./letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks:
-      - monitor
       - default
 
   studio:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\`studio.$DOMAIN\`)"
+      - "traefik.http.routers.studio.rule=Host(\`studio.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.studio.entrypoints=websecure"
-      - "traefik.http.routers.studio.tls.certresolver=myresolver"
+      - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
-      # Autenticación Básica
-      - "traefik.http.routers.studio.middlewares=studio-auth"
-      - "traefik.http.middlewares.studio-auth.basicauth.users=$BASIC_AUTH_HASH"
-      # Redirección http -> https
-      - "traefik.http.routers.studio-http.rule=Host(\`studio.$DOMAIN\`)"
+      - "traefik.http.routers.studio.middlewares=studio-auth,https-redirect"
+      - "traefik.http.middlewares.studio-auth.basicauth.users=BASICAUTH_PLACEHOLDER"
+      - "traefik.http.routers.studio-http.rule=Host(\`studio.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.studio-http.entrypoints=web"
       - "traefik.http.routers.studio-http.middlewares=https-redirect"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
 
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(\`api.$DOMAIN\`)"
+      - "traefik.http.routers.api.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
-      # Redirección http -> https
-      - "traefik.http.routers.api-http.rule=Host(\`api.$DOMAIN\`)"
+      - "traefik.http.routers.api-http.rule=Host(\`api.DOMAIN_PLACEHOLDER\`)"
       - "traefik.http.routers.api-http.entrypoints=web"
       - "traefik.http.routers.api-http.middlewares=https-redirect"
-
-networks:
-  monitor:
-    driver: bridge
 EOF
 
-# 7. Iniciar servicios
+# Reemplazar placeholders
+sed -i "s|EMAIL_PLACEHOLDER|$EMAIL|g" docker-compose.override.yml
+sed -i "s|DOMAIN_PLACEHOLDER|$DOMAIN|g" docker-compose.override.yml
+sed -i "s|BASICAUTH_PLACEHOLDER|$BASIC_AUTH_HASH|g" docker-compose.override.yml
+
+# Crear directorio para certificados
+mkdir -p letsencrypt
+touch letsencrypt/acme.json
+chmod 600 letsencrypt/acme.json
+
+# 7. Detener servicios previos si existen
+echo -e "${GREEN}Deteniendo servicios anteriores si existen...${NC}"
+docker compose down 2>/dev/null || true
+
+# 8. Iniciar servicios
 echo -e "${GREEN}Iniciando contenedores...${NC}"
 docker compose up -d
 
-echo -e "${GREEN}=== Instalación Completada ===${NC}"
-echo -e "Tus credenciales:"
-echo -e "Postgres Password: ${YELLOW}$POSTGRES_PASSWORD${NC}"
-echo -e "Dashboard User:    ${YELLOW}$DASHBOARD_USERNAME${NC}"
-echo -e "Dashboard Pass:    ${YELLOW}$DASHBOARD_PASSWORD${NC}"
-echo -e "Dashboard URL:     ${YELLOW}https://studio.$DOMAIN${NC}"
-echo -e "API URL:           ${YELLOW}https://api.$DOMAIN${NC}"
-echo -e "Directorio de instalación: ${YELLOW}$INSTALL_DIR${NC}"
-echo -e "${YELLOW}NOTA: Asegúrate de que los registros DNS (A) para studio.$DOMAIN y api.$DOMAIN apunten a la IP de este servidor en Cloudflare (Nube Naranja activada).${NC}"
-echo -e "${YELLOW}En Cloudflare, configura el modo SSL/TLS a 'Full' o 'Full (Strict)'.${NC}"
+# 9. Esperar a que los servicios estén listos
+echo -e "${YELLOW}Esperando a que los servicios inicien (esto puede tomar 1-2 minutos)...${NC}"
+sleep 30
+
+# 10. Verificar estado de los contenedores
+echo -e "${GREEN}Estado de los contenedores:${NC}"
+docker compose ps
+
+echo ""
+echo -e "${GREEN}=== ✓ Instalación Completada ===${NC}"
+echo ""
+echo -e "${GREEN}Tus credenciales (también guardadas en /root/supabase_credentials.txt):${NC}"
+echo -e "  Postgres Password: ${YELLOW}$POSTGRES_PASSWORD${NC}"
+echo -e "  Dashboard User:    ${YELLOW}$DASHBOARD_USERNAME${NC}"
+echo -e "  Dashboard Pass:    ${YELLOW}$DASHBOARD_PASSWORD${NC}"
+echo -e "  Dashboard URL:     ${YELLOW}https://studio.$DOMAIN${NC}"
+echo -e "  API URL:           ${YELLOW}https://api.$DOMAIN${NC}"
+echo ""
+echo -e "${YELLOW}IMPORTANTE - Configuración DNS en Cloudflare:${NC}"
+echo -e "  1. Ve a Cloudflare > DNS > Records"
+echo -e "  2. Crea registro A: ${GREEN}studio.$DOMAIN${NC} -> IP de tu servidor (Proxy: ${GREEN}Activado${NC})"
+echo -e "  3. Crea registro A: ${GREEN}api.$DOMAIN${NC} -> IP de tu servidor (Proxy: ${GREEN}Activado${NC})"
+echo -e "  4. En SSL/TLS > Overview, selecciona modo: ${GREEN}Full${NC}"
+echo ""
+echo -e "${YELLOW}Para ver los logs:${NC} cd /opt/supabase && docker compose logs -f"
+echo -e "${YELLOW}Para reiniciar:${NC} cd /opt/supabase && docker compose restart"
+echo ""
