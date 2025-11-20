@@ -53,7 +53,10 @@ echo -e "${GREEN}[3/6] Downloading Supabase...${NC}"
 INSTALL_DIR="/opt/supabase"
 if [ -d "$INSTALL_DIR" ]; then
     echo -e "${YELLOW}Removing existing installation...${NC}"
-    cd "$INSTALL_DIR/docker" 2>/dev/null && docker compose down 2>/dev/null || true
+    # Force kill any stuck containers first
+    docker ps -a | grep -E "supabase|traefik|kong" | awk '{print $1}' | xargs -r docker rm -f 2>/dev/null || true
+    cd "$INSTALL_DIR/docker" 2>/dev/null && timeout 30 docker compose down 2>/dev/null || true
+    cd /
     rm -rf "$INSTALL_DIR"
 fi
 git clone --depth 1 https://github.com/supabase/supabase "$INSTALL_DIR" > /dev/null 2>&1
