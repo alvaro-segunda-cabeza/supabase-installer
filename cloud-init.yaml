@@ -1,0 +1,63 @@
+#cloud-config
+# Supabase Self-Hosting Cloud-Init Configuration
+# Paste this into the "User Data" or "Cloud-Init" field when creating your VPS.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - git
+  - pwgen
+  - openssl
+  - sed
+
+runcmd:
+  # 1. Install Docker
+  - curl -fsSL https://get.docker.com -o get-docker.sh
+  - sh get-docker.sh
+  - rm get-docker.sh
+
+  # 2. Clone Supabase
+  - git clone --depth 1 https://github.com/supabase/supabase /opt/supabase
+
+  # 3. Configure Environment and Secrets
+  - cd /opt/supabase/docker
+  - cp .env.example .env
+  
+  # Generate Secrets using a temporary script embedded in runcmd
+  - |
+    DB_PASSWORD=$(openssl rand -base64 12)
+    JWT_SECRET=$(openssl rand -hex 32)
+    
+    # Function to generate JWT (HS256)
+    generate_jwt() {
+        local payload=$1
+        local secret=$2
+        local header='{"alg":"HS256","typ":"JWT"}'
+        local header_b64=$(echo -n "$header" | openssl base64 -e -A | sed s/\+/-/g | sed s/\//_/g | sed -E s/=+$//)
+        local payload_b64=$(echo -n "$payload" | openssl base64 -e -A | sed s/\+/-/g | sed s/\//_/g | sed -E s/=+$//)
+        local signature=$(echo -n "${header_b64}.${payload_b64}" | openssl dgst -sha256 -hmac "$secret" -binary | openssl base64 -e -A | sed s/\+/-/g | sed s/\//_/g | sed -E s/=+$//)
+        echo "${header_b64}.${payload_b64}.${signature}"
+    }
+    
+    IAT=$(date +%s)
+    EXP=$((IAT + 315360000)) # +10 years
+    
+    ANON_PAYLOAD="{\"role\":\"anon\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
+    ANON_KEY=$(generate_jwt "$ANON_PAYLOAD" "$JWT_SECRET")
+    
+    SERVICE_PAYLOAD="{\"role\":\"service_role\",\"iss\":\"supabase\",\"iat\":$IAT,\"exp\":$EXP}"
+    SERVICE_KEY=$(generate_jwt "$SERVICE_PAYLOAD" "$JWT_SECRET")
+    
+    # Update .env
+    sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
+    sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env
+    sed -i "s|ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
+    sed -i "s|SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_KEY|" .env
+
+  # 4. Start Supabase
+  - docker compose pull
+  - docker compose up -d
+
+final_message: "Supabase installation finished. Access Studio at http://$INSTANCE_IP:8000"
