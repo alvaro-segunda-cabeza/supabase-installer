@@ -75,3 +75,35 @@ Para ver tus claves generadas (necesarias para conectar tu frontend):
 cat /opt/supabase/docker/.env
 ```
 Busca `ANON_KEY` y `SERVICE_ROLE_KEY`.
+
+## Solución de Problemas (Troubleshooting)
+
+Si algo no funciona o tus dominios dan error, ejecuta estos comandos en tu servidor para diagnosticar:
+
+### 1. Verificar que los contenedores están corriendo
+```bash
+docker ps
+```
+Deberías ver una lista de contenedores (supabase-studio, supabase-kong, traefik, etc.) con estado "Up". Si alguno dice "Restarting" o no aparece, hay un error.
+
+### 2. Ver logs de Traefik (Problemas de SSL)
+Si tus dominios no cargan o dan error de certificado, revisa los logs de Traefik:
+```bash
+docker logs traefik
+```
+Busca errores en rojo relacionados con "acme" o "letsencrypt". Común: errores de validación DNS si los registros A no apuntaban a la IP antes de instalar.
+
+### 3. Verificar si Supabase responde localmente
+Intenta conectar desde dentro del servidor para descartar problemas de firewall:
+```bash
+curl -I http://localhost:8000
+```
+Deberías recibir un `HTTP/1.1 200 OK` (o 404, pero respuesta al fin).
+
+### 4. Reiniciar todo
+A veces un reinicio limpio soluciona problemas de configuración:
+```bash
+cd /opt/supabase/docker
+docker compose down
+docker compose up -d
+```
