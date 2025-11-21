@@ -3,7 +3,8 @@ set -e
 
 DOMAIN="segundacabeza.net"
 EMAIL="admin@$DOMAIN"
-SUPABASE_RELEASE="v1.184.0"
+# 💡 CAMBIO 1: Usamos 'latest' en lugar de una versión fija
+SUPABASE_RELEASE="latest" 
 
 echo "==============================================="
 echo " SUPABASE SELF-HOST (OFICIAL, RELEASE ESTABLE)"
@@ -16,7 +17,8 @@ apt install -y git curl jq openssl nano ufw
 mkdir -p /apps/traefik
 mkdir -p /apps/supabase
 
-docker network create traefik-network || true
+# Evitar el error "network already exists"
+docker network create traefik-network 2>/dev/null || true
 
 #########################################################
 # TRAEFIK
@@ -56,6 +58,8 @@ EOF
 
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
+---------------------------------------------------------
+
 #########################################################
 # SUPABASE RELEASE
 #########################################################
@@ -63,10 +67,11 @@ docker compose -f /apps/traefik/docker-compose.yml up -d
 cd /apps/supabase
 
 if [ ! -d "source" ]; then
-  git clone --branch "$SUPABASE_RELEASE" --depth 1 https://github.com/supabase/supabase.git source
+  # 💡 CAMBIO 2: Usamos 'latest' como la rama a clonar
+  git clone --branch "$SUPABASE_RELEASE" --single-branch --depth 1 https://github.com/supabase/supabase.git source
 fi
 
-# 🚨 LÍNEA CORREGIDA: Cambiado de 'cd source/docker' a 'cd source'
+# El 'cd source' sigue siendo correcto para la estructura moderna
 cd source
 
 #########################################################
@@ -129,6 +134,8 @@ EOF
 #########################################################
 
 docker compose -f docker-compose.yml -f traefik.override.yml up -d
+
+---------------------------------------------------------
 
 #########################################################
 # DONE
