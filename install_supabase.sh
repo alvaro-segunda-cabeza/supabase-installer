@@ -3,13 +3,11 @@ set -e
 
 DOMAIN="segundacabeza.net"
 EMAIL="admin@$DOMAIN"
-
-API_DOMAIN="api.$DOMAIN"
-STUDIO_DOMAIN="studio.$DOMAIN"
+SUPABASE_RELEASE="v1.184.0"
 
 echo "==============================================="
-echo " SUPABASE SELF-HOST (OFICIAL)                 "
-echo " Usando Kong API Gateway con 1 solo dominio   "
+echo " SUPABASE SELF-HOST (OFICIAL, RELEASE ESTABLE)"
+echo " Release: $SUPABASE_RELEASE"
 echo "==============================================="
 
 apt update -y
@@ -28,8 +26,8 @@ cat <<EOF >/apps/traefik/docker-compose.yml
 services:
   traefik:
     image: traefik:v2.11
-    restart: always
     container_name: traefik
+    restart: always
     command:
       - "--providers.docker=true"
       - "--api.dashboard=true"
@@ -46,10 +44,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /apps/traefik/letsencrypt:/letsencrypt
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/apps/traefik/letsencrypt:/letsencrypt"
     networks:
       - traefik-network
+
 networks:
   traefik-network:
     external: true
@@ -58,17 +57,19 @@ EOF
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
 #########################################################
-# SUPABASE
+# SUPABASE RELEASE
 #########################################################
 
 cd /apps/supabase
 
-git clone --depth 1 --branch docker-compose https://github.com/supabase/supabase.git source || true
+if [ ! -d "source" ]; then
+  git clone --branch "$SUPABASE_RELEASE" --depth 1 https://github.com/supabase/supabase.git source
+fi
 
 cd source/docker
 
 #########################################################
-# ENV GENERATION (OFICIAL)
+# GENERACIÓN DE CLAVES
 #########################################################
 
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
@@ -76,33 +77,36 @@ JWT_SECRET=$(openssl rand -hex 32)
 SERVICE_ROLE_KEY=$(openssl rand -hex 32)
 ANON_KEY=$(openssl rand -hex 32)
 
+#########################################################
+# CREAR .env OFICIAL
+#########################################################
+
 cat <<EOF >.env
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+
 JWT_SECRET=$JWT_SECRET
 SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
 ANON_KEY=$ANON_KEY
 
-API_EXTERNAL_URL=https://$API_DOMAIN
-SITE_URL=https://$STUDIO_DOMAIN
+SITE_URL=https://studio.$DOMAIN
+API_EXTERNAL_URL=https://api.$DOMAIN
 
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
 POSTGRES_DB=postgres
-PGRST_DB_SCHEMAS=public,storage
 EOF
 
 #########################################################
-# TRAEFIK OVERRIDE (OFICIAL 2 DOMINIOS)
+# TRAEFIK OVERRIDE PARA KONG + STUDIO
 #########################################################
 
 cat <<EOF >traefik.override.yml
 services:
-
   kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.kong.rule=Host(\\"$API_DOMAIN\\")"
       - "traefik.http.routers.kong.entrypoints=websecure"
+      - "traefik.http.routers.kong.rule=Host(\\\"api.$DOMAIN\\\")"
       - "traefik.http.routers.kong.tls.certresolver=letsencrypt"
       - "traefik.http.services.kong.loadbalancer.server.port=8000"
     networks:
@@ -111,20 +115,16 @@ services:
   studio:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\\"$STUDIO_DOMAIN\\")"
       - "traefik.http.routers.studio.entrypoints=websecure"
+      - "traefik.http.routers.studio.rule=Host(\\\"studio.$DOMAIN\\\")"
       - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
     networks:
       - traefik-network
-
-networks:
-  traefik-network:
-    external: true
 EOF
 
 #########################################################
-# START SUPABASE (OFICIAL)
+# LEVANTAR SUPABASE
 #########################################################
 
 docker compose -f docker-compose.yml -f traefik.override.yml up -d
@@ -136,8 +136,8 @@ docker compose -f docker-compose.yml -f traefik.override.yml up -d
 echo "==============================================="
 echo " SUPABASE INSTALADO CORRECTAMENTE"
 echo "==============================================="
-echo "API Gateway (Kong): https://$API_DOMAIN"
-echo "Studio Dashboard:   https://$STUDIO_DOMAIN"
+echo "Studio: https://studio.$DOMAIN"
+echo "API Gateway (Kong): https://api.$DOMAIN"
 echo "==============================================="
 echo "POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
 echo "SERVICE_ROLE_KEY:  $SERVICE_ROLE_KEY"
