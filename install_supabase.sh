@@ -8,15 +8,17 @@ ROOT_DOMAIN="segundacabeza.net"
 EMAIL="alvaro@segundacabeza.net"
 INSTALL_DIR="/opt/supabase"
 
-echo ">>> Starting Supabase full installer for $ROOT_DOMAIN"
+echo ">>> Installing full Supabase stack on $ROOT_DOMAIN"
+
+###############################
+# INSTALL DEPENDENCIES
+###############################
+apt update -y && apt upgrade -y
+apt install -y ca-certificates curl gnupg git ufw openssl lsb-release
 
 ###############################
 # INSTALL DOCKER
 ###############################
-echo ">>> Installing Docker..."
-apt update -y && apt upgrade -y
-apt install -y ca-certificates curl gnupg git ufw lsb-release
-
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
  | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -33,7 +35,6 @@ apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker
 ###############################
 # FIREWALL
 ###############################
-echo ">>> Configuring firewall..."
 ufw allow ssh
 ufw allow 80
 ufw allow 443
@@ -42,16 +43,24 @@ yes | ufw enable || true
 ###############################
 # DIRECTORY STRUCTURE
 ###############################
-echo ">>> Creating structure..."
 mkdir -p $INSTALL_DIR/traefik/dynamic
 touch $INSTALL_DIR/traefik/acme.json
 chmod 600 $INSTALL_DIR/traefik/acme.json
 
 ###############################
-# TRAEFIK BASE CONFIG
+# GENERATE SECRETS
 ###############################
-echo ">>> Writing Traefik config..."
+POSTGRES_PASSWORD=$(openssl rand -hex 32)
+JWT_SECRET=$(openssl rand -hex 32)
+ANON_KEY=$(openssl rand -hex 32)
+SERVICE_ROLE_KEY=$(openssl rand -hex 32)
+PG_META_CRYPTO_KEY=$(openssl rand -hex 32)
+DASHBOARD_PASSWORD=$(openssl rand -hex 16)
+VAULT_ENC_KEY=$(openssl rand -hex 32)
 
+###############################
+# TRAEFIK STATIC CONFIG
+###############################
 cat <<EOF > $INSTALL_DIR/traefik/traefik.yml
 entryPoints:
   web:
@@ -82,97 +91,184 @@ api:
 EOF
 
 ###############################
-# DOWNLOAD SUPABASE
+# CREATE ENV FILE
 ###############################
-echo ">>> Cloning Supabase repo..."
-cd $INSTALL_DIR
-git clone https://github.com/supabase/supabase.git || true
+cat <<EOF > $INSTALL_DIR/.env
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+JWT_SECRET=$JWT_SECRET
+ANON_KEY=$ANON_KEY
+SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
+PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY
+DASHBOARD_PASSWORD=$DASHBOARD_PASSWORD
+VAULT_ENC_KEY=$VAULT_ENC_KEY
 
-cd $INSTALL_DIR/supabase/docker
-cp .env.example .env
-
-###############################
-# DOMAIN PATCHING
-###############################
-echo ">>> Setting domains..."
-
-declare -A MAP
-MAP=(
- ["KONG_DNS"]="api"
- ["STUDIO"]="studio"
- ["GOTRUE"]="auth"
- ["STORAGE"]="storage"
- ["REALTIME"]="realtime"
- ["FUNCTIONS"]="functions"
- ["POSTGREST"]="rest"
- ["GRAPHQL"]="graphql"
- ["META"]="meta"
- ["IMGPROXY"]="img"
- ["ANALYTICS"]="analytics"
-)
-
-for key in "${!MAP[@]}"; do
-  sed -i "s|${key}_URL=.*|${key}_URL=https://${MAP[$key]}.$ROOT_DOMAIN|g" .env
-done
-
-###############################
-# TRAEFIK ROUTERS
-###############################
-echo ">>> Creating docker-compose override..."
-
-cat <<EOF > $INSTALL_DIR/supabase/docker/docker-compose.override.yml
-version: "3.9"
-services:
+API_URL=https://api.$ROOT_DOMAIN
+STUDIO_URL=https://studio.$ROOT_DOMAIN
+AUTH_URL=https://auth.$ROOT_DOMAIN
+STORAGE_URL=https://storage.$ROOT_DOMAIN
+REALTIME_URL=https://realtime.$ROOT_DOMAIN
+FUNCTIONS_URL=https://functions.$ROOT_DOMAIN
+REST_URL=https://rest.$ROOT_DOMAIN
+GRAPHQL_URL=https://graphql.$ROOT_DOMAIN
+META_URL=https://meta.$ROOT_DOMAIN
+IMG_URL=https://img.$ROOT_DOMAIN
+ANALYTICS_URL=https://analytics.$ROOT_DOMAIN
 EOF
 
-for key in "${!MAP[@]}"; do
-service="${MAP[$key]}"
-cat <<EOF >> $INSTALL_DIR/supabase/docker/docker-compose.override.yml
-  ${service}:
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.${service}.rule=Host(\`${service}.${ROOT_DOMAIN}\`)
-      - traefik.http.routers.${service}.entrypoints=websecure
-      - traefik.http.routers.${service}.tls.certresolver=letsencrypt
-
-EOF
-done
-
 ###############################
-# ROOT DOCKER COMPOSE
+# DOCKER COMPOSE
 ###############################
-echo ">>> Creating root docker-compose.yml..."
-
 cat <<EOF > $INSTALL_DIR/docker-compose.yml
 version: "3.9"
 
 services:
+
   traefik:
     image: traefik:v3.1
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./traefik/traefik.yml:/traefik/traefik.yml:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/acme.json:/acme.json
       - ./traefik/dynamic:/traefik/dynamic
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: always
+    restart: unless-stopped
+
+  db:
+    image: supabase/postgres:15.1.0.89
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  studio:
+    image: supabase/studio:latest
+    env_file: .env
+    depends_on: [api]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.studio.rule=Host(\`studio.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.studio.entrypoints=websecure
+      - traefik.http.routers.studio.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  api:
+    image: supabase/postgrest:latest
+    env_file: .env
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(\`api.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  auth:
+    image: supabase/gotrue:latest
+    env_file: .env
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.auth.rule=Host(\`auth.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.auth.entrypoints=websecure
+      - traefik.http.routers.auth.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  storage:
+    image: supabase/storage-api:latest
+    env_file: .env
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.storage.rule=Host(\`storage.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.storage.entrypoints=websecure
+      - traefik.http.routers.storage.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  realtime:
+    image: supabase/realtime:latest
+    env_file: .env
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.realtime.rule=Host(\`realtime.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.realtime.entrypoints=websecure
+      - traefik.http.routers.realtime.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  functions:
+    image: supabase/functions:latest
+    env_file: .env
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.functions.rule=Host(\`functions.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.functions.entrypoints=websecure
+      - traefik.http.routers.functions.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  graphql:
+    image: supabase/graphql:latest
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.graphql.rule=Host(\`graphql.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.graphql.entrypoints=websecure
+      - traefik.http.routers.graphql.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  rest:
+    image: supabase/postgrest:latest
+    env_file: .env
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.rest.rule=Host(\`rest.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.rest.entrypoints=websecure
+      - traefik.http.routers.rest.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  meta:
+    image: supabase/meta:latest
+    env_file: .env
+    depends_on: [db]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.meta.rule=Host(\`meta.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.meta.entrypoints=websecure
+      - traefik.http.routers.meta.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  img:
+    image: supabase/imgproxy:latest
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.img.rule=Host(\`img.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.img.entrypoints=websecure
+      - traefik.http.routers.img.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+  analytics:
+    image: supabase/logflare:latest
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.analytics.rule=Host(\`analytics.${ROOT_DOMAIN}\`)
+      - traefik.http.routers.analytics.entrypoints=websecure
+      - traefik.http.routers.analytics.tls.certresolver=letsencrypt
+    restart: unless-stopped
+
+volumes:
+  pgdata:
 EOF
 
 ###############################
-# START SUPABASE
+# START STACK
 ###############################
-echo ">>> Launching Supabase full stack..."
-
 cd $INSTALL_DIR
+docker compose up -d
 
-docker compose \
-  -f docker-compose.yml \
-  -f supabase/docker/docker-compose.yml \
-  -f supabase/docker/docker-compose.override.yml \
-  up -d
-
+echo ""
 echo ">>> Supabase installed successfully!"
 echo ""
 echo "Studio:     https://studio.$ROOT_DOMAIN"
@@ -186,7 +282,6 @@ echo "GraphQL:    https://graphql.$ROOT_DOMAIN"
 echo "Meta:       https://meta.$ROOT_DOMAIN"
 echo "ImgProxy:   https://img.$ROOT_DOMAIN"
 echo "Analytics:  https://analytics.$ROOT_DOMAIN"
+echo "Traefik:    https://traefik.$ROOT_DOMAIN"
 echo ""
-echo "Traefik dashboard: https://traefik.$ROOT_DOMAIN"
-echo ""
-echo ">>> ALL DONE."
+echo ">>> DONE."
