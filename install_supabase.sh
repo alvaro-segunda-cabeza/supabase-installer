@@ -4,9 +4,12 @@ set -e
 DOMAIN="segundacabeza.net"
 EMAIL="admin@$DOMAIN"
 
+API_DOMAIN="api.$DOMAIN"
+STUDIO_DOMAIN="studio.$DOMAIN"
+
 echo "==============================================="
-echo " INSTALADOR SUPABASE SELF-HOSTED (OFICIAL)    "
-echo " Rama estable: docker-compose                  "
+echo " SUPABASE SELF-HOST (OFICIAL)                 "
+echo " Usando Kong API Gateway con 1 solo dominio   "
 echo "==============================================="
 
 apt update -y
@@ -25,8 +28,8 @@ cat <<EOF >/apps/traefik/docker-compose.yml
 services:
   traefik:
     image: traefik:v2.11
-    container_name: traefik
     restart: always
+    container_name: traefik
     command:
       - "--providers.docker=true"
       - "--api.dashboard=true"
@@ -43,11 +46,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "/apps/traefik/letsencrypt:/letsencrypt"
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /apps/traefik/letsencrypt:/letsencrypt
     networks:
       - traefik-network
-
 networks:
   traefik-network:
     external: true
@@ -56,19 +58,17 @@ EOF
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
 #########################################################
-# SUPABASE (docker-compose branch)
+# SUPABASE
 #########################################################
 
 cd /apps/supabase
 
-if [ ! -d "source" ]; then
-  git clone --depth 1 --branch docker-compose https://github.com/supabase/supabase.git source
-fi
+git clone --depth 1 --branch docker-compose https://github.com/supabase/supabase.git source || true
 
 cd source/docker
 
 #########################################################
-# ENV GENERATION
+# ENV GENERATION (OFICIAL)
 #########################################################
 
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
@@ -82,8 +82,8 @@ JWT_SECRET=$JWT_SECRET
 SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
 ANON_KEY=$ANON_KEY
 
-SITE_URL=https://studio.$DOMAIN
-API_EXTERNAL_URL=https://api.$DOMAIN
+API_EXTERNAL_URL=https://$API_DOMAIN
+SITE_URL=https://$STUDIO_DOMAIN
 
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
@@ -92,48 +92,39 @@ PGRST_DB_SCHEMAS=public,storage
 EOF
 
 #########################################################
-# TRAEFIK OVERRIDE
+# TRAEFIK OVERRIDE (OFICIAL 2 DOMINIOS)
 #########################################################
 
 cat <<EOF >traefik.override.yml
 services:
-EOF
 
-declare -A SUBDOMAINS=(
-  ["kong"]="api"
-  ["gotrue"]="auth"
-  ["auth"]="auth"
-  ["rest"]="rest"
-  ["postgres-meta"]="meta"
-  ["realtime"]="realtime"
-  ["storage-gateway"]="storage"
-  ["imgproxy"]="img"
-  ["studio"]="studio"
-  ["analytics"]="analytics"
-  ["pgrst"]="rest"
-  ["supavisor"]="graphql"
-  ["edge-runtime"]="functions"
-)
-
-for SERVICE in "${!SUBDOMAINS[@]}"; do
-  SUB=${SUBDOMAINS[$SERVICE]}
-
-cat <<EOF >>traefik.override.yml
-  $SERVICE:
+  kong:
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.${SERVICE}.entrypoints=websecure"
-      - "traefik.http.routers.${SERVICE}.rule=Host(\\\"$SUB.$DOMAIN\\\")"
-      - "traefik.http.routers.${SERVICE}.tls.certresolver=letsencrypt"
-      - "traefik.http.services.${SERVICE}.loadbalancer.server.port=3000"
+      - "traefik.http.routers.kong.rule=Host(\\"$API_DOMAIN\\")"
+      - "traefik.http.routers.kong.entrypoints=websecure"
+      - "traefik.http.routers.kong.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kong.loadbalancer.server.port=8000"
     networks:
       - traefik-network
 
+  studio:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.studio.rule=Host(\\"$STUDIO_DOMAIN\\")"
+      - "traefik.http.routers.studio.entrypoints=websecure"
+      - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
+      - "traefik.http.services.studio.loadbalancer.server.port=3000"
+    networks:
+      - traefik-network
+
+networks:
+  traefik-network:
+    external: true
 EOF
-done
 
 #########################################################
-# START SUPABASE
+# START SUPABASE (OFICIAL)
 #########################################################
 
 docker compose -f docker-compose.yml -f traefik.override.yml up -d
@@ -145,14 +136,8 @@ docker compose -f docker-compose.yml -f traefik.override.yml up -d
 echo "==============================================="
 echo " SUPABASE INSTALADO CORRECTAMENTE"
 echo "==============================================="
-echo "Panel Studio: https://studio.$DOMAIN"
-echo "API Gateway:  https://api.$DOMAIN"
-echo "REST:         https://rest.$DOMAIN"
-echo "Auth:         https://auth.$DOMAIN"
-echo "Storage:      https://storage.$DOMAIN"
-echo "Realtime:     https://realtime.$DOMAIN"
-echo "Edge Func:    https://functions.$DOMAIN"
-echo "GraphQL:      https://graphql.$DOMAIN"
+echo "API Gateway (Kong): https://$API_DOMAIN"
+echo "Studio Dashboard:   https://$STUDIO_DOMAIN"
 echo "==============================================="
 echo "POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
 echo "SERVICE_ROLE_KEY:  $SERVICE_ROLE_KEY"
