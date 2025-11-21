@@ -378,15 +378,26 @@ echo "$BASIC_AUTH_HASH" | sed 's/\$\$/\$/g' > nginx/conf.d/.htpasswd
 
 # 10. Iniciar servicios
 echo -e "${CYAN}[8/8] Iniciando todos los servicios...${NC}"
-docker compose up -d 2>&1 | tee /tmp/docker-compose-up.log
+echo -e "${YELLOW}Esto puede tomar varios minutos (descargando imágenes Docker)...${NC}"
 
-sleep 60
+# Descargar imágenes primero (sin output verboso que puede causar loops)
+docker compose pull --quiet 2>&1 | grep -v "Pulling" | grep -v "Waiting" | grep -v "Downloading" | grep -v "Extracting" || true
+
+echo -e "${CYAN}Imágenes descargadas, iniciando contenedores...${NC}"
+
+# Iniciar servicios sin el output que causa loops
+docker compose up -d --quiet-pull 2>&1 | grep -E "Creating|Started|Error" || true
+
+sleep 15
+echo -e "${CYAN}Esperando que los servicios se inicialicen...${NC}"
+sleep 45
+
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
 # Verificar que los servicios estén corriendo
 echo -e "${CYAN}Verificando servicios...${NC}"
-sleep 30
+sleep 20
 
 # Verificar contenedores críticos
 NGINX_RUNNING=$(docker ps --filter "name=supabase-nginx" --format "{{.Names}}" 2>/dev/null)
