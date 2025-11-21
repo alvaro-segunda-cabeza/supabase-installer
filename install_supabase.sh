@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-
 set -e
 
 DOMAIN="segundacabeza.net"
 EMAIL="admin@$DOMAIN"
 
-echo "=== Actualizando servidor ==="
-apt update -y && apt upgrade -y
+echo "==============================================="
+echo "   INSTALADOR AUTOMÁTICO SUPABASE SELF-HOSTED  "
+echo "        Dominio: $DOMAIN"
+echo "==============================================="
 
-echo "=== Instalando dependencias ==="
-apt install -y curl git nano ufw docker.io docker-compose-plugin
+echo "=== Actualizando repos ==="
+apt update -y
 
-echo "=== Creando carpetas de instalación ==="
+echo "=== Instalando utilidades ==="
+apt install -y git curl nano ufw
+
+echo "=== Creando carpetas ==="
 mkdir -p /apps/traefik
 mkdir -p /apps/supabase
 
-echo "=== Creando red compartida ==="
+echo "=== Creando red traefik compartida ==="
 docker network create traefik-network || true
 
 #########################################
@@ -40,11 +44,11 @@ services:
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
 
-      # Redirección HTTP → HTTPS
+      # Redirect HTTP -> HTTPS
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
 
-      # Certificados
+      # LetsEncrypt
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=$EMAIL"
@@ -56,9 +60,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "/apps/traefik/letsencrypt:/letsencrypt"
+
     networks:
       - traefik-network
 
@@ -67,7 +73,7 @@ networks:
     external: true
 EOF
 
-echo "=== Iniciando Traefik ==="
+echo "=== Levantando Traefik ==="
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
 #########################################
@@ -76,18 +82,20 @@ docker compose -f /apps/traefik/docker-compose.yml up -d
 
 echo "=== Descargando Supabase Self-Hosted ==="
 cd /apps/supabase
-git clone https://github.com/supabase/supabase.git source || true
+if [ ! -d "source" ]; then
+  git clone https://github.com/supabase/supabase.git source
+fi
 
 cd source/docker
 
-echo "=== Generando archivo Traefik override ==="
+echo "=== Generando override de Traefik para los servicios de Supabase ==="
 
 cat <<EOF >traefik.override.yml
 version: "3.9"
 services:
 EOF
 
-# Lista de servicios Supabase → subdominios esperados
+# Servicios → subdominios
 declare -A SUBS=(
   ["kong"]="api"
   ["gotrue"]="auth"
@@ -117,6 +125,7 @@ cat <<EOF >>traefik.override.yml
       - "traefik.http.services.${SERVICE}.loadbalancer.server.port=3000"
     networks:
       - traefik-network
+
 EOF
 
 done
@@ -124,5 +133,15 @@ done
 echo "=== Iniciando Supabase ==="
 docker compose -f docker-compose.yml -f traefik.override.yml up -d
 
-echo "=== Instalación completada ==="
-echo "Abrí https://studio.$DOMAIN para acceder al panel."
+echo "==============================================="
+echo "   SUPABASE INSTALADO CORRECTAMENTE"
+echo "==============================================="
+echo "Panel: https://studio.$DOMAIN"
+echo "API: https://api.$DOMAIN"
+echo "REST: https://rest.$DOMAIN"
+echo "Auth: https://auth.$DOMAIN"
+echo "Storage: https://storage.$DOMAIN"
+echo "Realtime: https://realtime.$DOMAIN"
+echo "Functions: https://functions.$DOMAIN"
+echo "GraphQL: https://graphql.$DOMAIN"
+echo "==============================================="
