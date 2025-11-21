@@ -5,8 +5,12 @@ DOMAIN="segundacabeza.net"
 EMAIL="admin@$DOMAIN"
 
 echo "==============================================="
-echo " INSTALADOR SUPABASE SELF-HOSTED (2025)        "
+echo " INSTALADOR SUPABASE SELF-HOSTED (OFICIAL)    "
+echo " Rama estable: docker-compose                  "
 echo "==============================================="
+
+apt update -y
+apt install -y git curl jq openssl nano ufw
 
 mkdir -p /apps/traefik
 mkdir -p /apps/supabase
@@ -34,6 +38,7 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=$EMAIL"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--serversTransport.insecureSkipVerify=true"
     ports:
       - "80:80"
       - "443:443"
@@ -51,43 +56,39 @@ EOF
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
 #########################################################
-# SUPABASE
+# SUPABASE (docker-compose branch)
 #########################################################
 
 cd /apps/supabase
 
 if [ ! -d "source" ]; then
-  git clone --depth 1 https://github.com/supabase/supabase.git source
+  git clone --depth 1 --branch docker-compose https://github.com/supabase/supabase.git source
 fi
 
 cd source/docker
 
 #########################################################
-# ENV GENERATION (mínimo necesario)
+# ENV GENERATION
 #########################################################
 
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 JWT_SECRET=$(openssl rand -hex 32)
 SERVICE_ROLE_KEY=$(openssl rand -hex 32)
 ANON_KEY=$(openssl rand -hex 32)
-PG_META_CRYPTO_KEY=$(openssl rand -hex 32)
-SECRET_KEY_BASE=$(openssl rand -hex 48)
-POOLER_TENANT_ID="default"
 
 cat <<EOF >.env
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 JWT_SECRET=$JWT_SECRET
 SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
 ANON_KEY=$ANON_KEY
-PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY
-SECRET_KEY_BASE=$SECRET_KEY_BASE
 
-SUPABASE_PUBLIC_URL=https://api.$DOMAIN
 SITE_URL=https://studio.$DOMAIN
+API_EXTERNAL_URL=https://api.$DOMAIN
 
-POOLER_TENANT_ID=$POOLER_TENANT_ID
-
-DOCKER_SOCKET_LOCATION=/var/run/docker.sock
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=postgres
+PGRST_DB_SCHEMAS=public,storage
 EOF
 
 #########################################################
@@ -96,27 +97,40 @@ EOF
 
 cat <<EOF >traefik.override.yml
 services:
-
-  kong:
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.kong.rule=Host(\\\"api.$DOMAIN\\\")"
-      - "traefik.http.routers.kong.entrypoints=websecure"
-      - "traefik.http.routers.kong.tls.certresolver=letsencrypt"
-      - "traefik.http.services.kong.loadbalancer.server.port=8000"
-    networks:
-      - traefik-network
-
-  studio:
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.studio.rule=Host(\\\"studio.$DOMAIN\\\")"
-      - "traefik.http.routers.studio.entrypoints=websecure"
-      - "traefik.http.routers.studio.tls.certresolver=letsencrypt"
-      - "traefik.http.services.studio.loadbalancer.server.port=3000"
-    networks:
-      - traefik-network
 EOF
+
+declare -A SUBDOMAINS=(
+  ["kong"]="api"
+  ["gotrue"]="auth"
+  ["auth"]="auth"
+  ["rest"]="rest"
+  ["postgres-meta"]="meta"
+  ["realtime"]="realtime"
+  ["storage-gateway"]="storage"
+  ["imgproxy"]="img"
+  ["studio"]="studio"
+  ["analytics"]="analytics"
+  ["pgrst"]="rest"
+  ["supavisor"]="graphql"
+  ["edge-runtime"]="functions"
+)
+
+for SERVICE in "${!SUBDOMAINS[@]}"; do
+  SUB=${SUBDOMAINS[$SERVICE]}
+
+cat <<EOF >>traefik.override.yml
+  $SERVICE:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${SERVICE}.entrypoints=websecure"
+      - "traefik.http.routers.${SERVICE}.rule=Host(\\\"$SUB.$DOMAIN\\\")"
+      - "traefik.http.routers.${SERVICE}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${SERVICE}.loadbalancer.server.port=3000"
+    networks:
+      - traefik-network
+
+EOF
+done
 
 #########################################################
 # START SUPABASE
@@ -129,10 +143,16 @@ docker compose -f docker-compose.yml -f traefik.override.yml up -d
 #########################################################
 
 echo "==============================================="
-echo " SUPABASE INSTALADO "
+echo " SUPABASE INSTALADO CORRECTAMENTE"
 echo "==============================================="
-echo "Studio:       https://studio.$DOMAIN"
+echo "Panel Studio: https://studio.$DOMAIN"
 echo "API Gateway:  https://api.$DOMAIN"
+echo "REST:         https://rest.$DOMAIN"
+echo "Auth:         https://auth.$DOMAIN"
+echo "Storage:      https://storage.$DOMAIN"
+echo "Realtime:     https://realtime.$DOMAIN"
+echo "Edge Func:    https://functions.$DOMAIN"
+echo "GraphQL:      https://graphql.$DOMAIN"
 echo "==============================================="
 echo "POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
 echo "SERVICE_ROLE_KEY:  $SERVICE_ROLE_KEY"
