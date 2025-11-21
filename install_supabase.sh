@@ -66,7 +66,8 @@ if [ ! -d "source" ]; then
   git clone --branch "$SUPABASE_RELEASE" --depth 1 https://github.com/supabase/supabase.git source
 fi
 
-cd source/docker
+# 🚨 LÍNEA CORREGIDA: Cambiado de 'cd source/docker' a 'cd source'
+cd source
 
 #########################################################
 # GENERACIÓN DE CLAVES
