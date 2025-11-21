@@ -22,8 +22,7 @@ mkdir -p /apps/supabase
 # Crear la red compartida para Docker (se ignora si ya existe)
 docker network create traefik-network 2>/dev/null || true
 
----
-
+# ---------------------------------------------------------
 # 2. CONFIGURACIÓN Y ARRANQUE DE TRAEFIK
 # ---------------------------------------------------------
 
@@ -62,8 +61,7 @@ EOF
 
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
----
-
+# ---------------------------------------------------------
 # 3. CONFIGURACIÓN DE SUPABASE
 # ---------------------------------------------------------
 
@@ -126,8 +124,7 @@ EOF
 # Levantar SUPABASE
 docker compose -f docker-compose.yml -f traefik.override.yml up -d
 
----
-
+# ---------------------------------------------------------
 # 4. FINALIZADO
 # ---------------------------------------------------------
 
