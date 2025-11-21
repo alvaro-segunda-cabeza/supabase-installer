@@ -7,7 +7,7 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${CYAN}Estamos intentando instalar Supabase con un solo comando.${NC}"
+echo -e "${CYAN}=== Instalador de Supabase ===${NC}"
 echo ""
 
 # Verificar si se ejecuta como root
@@ -16,27 +16,11 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 0. Limpiar instalaciones previas
-if [ -d "/opt/supabase" ]; then
-    cd /opt/supabase
-    docker compose down -v 2>/dev/null || true
-    cd /
-fi
-
-docker ps -a | grep -E "supabase|nginx|postgres|kong" | awk '{print $1}' | xargs -r docker stop 2>/dev/null || true
-docker ps -a | grep -E "supabase|nginx|postgres|kong" | awk '{print $1}' | xargs -r docker rm 2>/dev/null || true
-docker volume ls | grep supabase | awk '{print $2}' | xargs -r docker volume rm 2>/dev/null || true
-
-if [ -d "/opt/supabase" ]; then
-    rm -rf /opt/supabase 2>/dev/null || true
-fi
-
-# 1. Solicitar información al usuario
+# 1. Solicitar información al usuario PRIMERO
+echo -e "${YELLOW}Configuración inicial:${NC}"
 echo ""
-echo -n "Introduce tu dominio base (ej. midominio.com): "
-read DOMAIN
-echo -n "Introduce tu email para Let's Encrypt: "
-read EMAIL
+read -p "Introduce tu dominio base (ej. midominio.com): " DOMAIN
+read -p "Introduce tu email para Let's Encrypt: " EMAIL
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
@@ -44,17 +28,19 @@ if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
 fi
 
 echo ""
+echo -e "${GREEN}✓ Configuración guardada${NC}"
+echo ""
 
 # 2. Actualizar sistema e instalar dependencias básicas
+echo -e "${CYAN}[1/8] Actualizando sistema e instalando dependencias...${NC}"
 apt-get update -y > /dev/null 2>&1
 DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" > /dev/null 2>&1
 apt-get install -y curl git wget sudo apache2-utils > /dev/null 2>&1
-
-sleep 30
-echo -e "${CYAN}Ah re que intentando, nada que ver el chabón. Venimos bien.${NC}"
+echo -e "${GREEN}✓ Dependencias instaladas${NC}"
 echo ""
 
 # 3. Instalar Docker y Docker Compose
+echo -e "${CYAN}[2/8] Instalando Docker...${NC}"
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh > /dev/null 2>&1
@@ -63,14 +49,31 @@ fi
 
 systemctl enable docker > /dev/null 2>&1
 systemctl start docker > /dev/null 2>&1
+sleep 5
+echo -e "${GREEN}✓ Docker instalado y corriendo${NC}"
+echo ""
 
-# 4. Preparar directorio de Supabase
+# 4. Limpiar instalaciones previas (AHORA que Docker está instalado)
+echo -e "${CYAN}[3/8] Limpiando instalaciones previas...${NC}"
+if [ -d "/opt/supabase" ]; then
+    cd /opt/supabase
+    docker compose down -v 2>/dev/null || true
+    cd /
+    rm -rf /opt/supabase 2>/dev/null || true
+fi
+
+docker ps -a | grep -E "supabase|nginx|postgres|kong" | awk '{print $1}' | xargs -r docker stop 2>/dev/null || true
+docker ps -a | grep -E "supabase|nginx|postgres|kong" | awk '{print $1}' | xargs -r docker rm 2>/dev/null || true
+docker volume ls | grep supabase | awk '{print $2}' | xargs -r docker volume rm 2>/dev/null || true
+echo -e "${GREEN}✓ Limpieza completada${NC}"
+echo ""
+
+# 5. Preparar directorio de Supabase
+echo -e "${CYAN}[4/8] Descargando configuración de Supabase...${NC}"
 INSTALL_DIR="/opt/supabase"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# 5. Descargar configuración probada y funcional
-echo -e "${CYAN}Descargando configuración de Supabase...${NC}"
 git clone --depth 1 https://github.com/singh-inder/supabase-automated-self-host.git temp_repo > /dev/null 2>&1
 
 if [ -d "temp_repo/docker" ]; then
@@ -78,12 +81,11 @@ if [ -d "temp_repo/docker" ]; then
 fi
 
 rm -rf temp_repo
-
-sleep 30
-echo -e "${CYAN}Supabase viene del griego supa, que significa base.${NC}"
+echo -e "${GREEN}✓ Configuración descargada${NC}"
 echo ""
 
 # 6. Generar Secretos Seguros
+echo -e "${CYAN}[5/8] Generando secretos seguros...${NC}"
 generate_secret() {
     openssl rand -base64 32 | tr -d '/+=' | head -c 32
 }
@@ -100,12 +102,7 @@ SECRET_KEY_BASE=$(generate_secret)
 
 BASIC_AUTH_HASH=$(echo "$DASHBOARD_PASSWORD" | htpasswd -ni $DASHBOARD_USERNAME 2>/dev/null | sed 's/\$/\$\$/g')
 
-# 7. Crear archivo .env desde el ejemplo
-if [ -f ".env.example" ]; then
-    cp .env.example .env
-fi
-
-# Reemplazar valores en el .env
+# 7. Crear archivo .env
 cat > .env <<ENVFILE
 # Secrets
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
@@ -172,11 +169,14 @@ POOLER_TENANT_ID=pooler-dev
 POOLER_PROXY_PORT_TRANSACTION=6543
 POOLER_DB_POOL_SIZE=10
 
-# Storage
+# Storage - Variables S3 necesarias
+REGION=us-east-1
+GLOBAL_S3_BUCKET=supabase-storage
+TENANT_ID=stub
+S3_PROTOCOL_PREFIX=http
+S3_PROTOCOL_ACCESS_KEY_ID=stub
+S3_PROTOCOL_ACCESS_KEY_SECRET=stub
 IMGPROXY_ENABLE_WEBP_DETECTION=true
-
-# Edge Runtime - IMPORTANTE: Esta es la clave
-DOCKER_SOCKET_LOCATION=/var/run/docker.sock
 
 # Vault
 VAULT_ENC_KEY=$VAULT_ENC_KEY
@@ -203,11 +203,23 @@ API URL: http://api.$DOMAIN
 =================================
 CREDS
 
-sleep 30
-echo -e "${CYAN}Bueno no, no era así. Pero igual la instalación viene joya. Faltan unos 3 o 4 minutos, dependiendo cuánto hayas puesto en este servidor.${NC}"
+echo -e "${GREEN}✓ Secretos generados${NC}"
 echo ""
 
-# 8. Crear docker-compose.override.yml con Nginx (sin SSL)
+# 8. Corregir docker-compose.yml (eliminar DOCKER_SOCKET_LOCATION)
+echo -e "${CYAN}[6/8] Corrigiendo docker-compose.yml...${NC}"
+
+# Eliminar cualquier referencia a DOCKER_SOCKET_LOCATION que cause problemas
+sed -i 's|/var/run/docker\.sock/var/run/docker\.sock|/var/run/docker.sock|g' docker-compose.yml
+sed -i 's|:\${DOCKER_SOCKET_LOCATION[^}]*}:/var/run/docker.sock|/var/run/docker.sock:/var/run/docker.sock|g' docker-compose.yml
+sed -i 's|\${DOCKER_SOCKET_LOCATION[^}]*}|/var/run/docker.sock|g' docker-compose.yml
+
+echo -e "${GREEN}✓ docker-compose.yml corregido${NC}"
+echo ""
+
+# 9. Crear docker-compose.override.yml con Nginx
+echo -e "${CYAN}[7/8] Configurando Nginx...${NC}"
+
 cat > docker-compose.override.yml << 'OVERRIDE_EOF'
 services:
   nginx:
@@ -226,7 +238,6 @@ services:
       - kong
 OVERRIDE_EOF
 
-# Crear directorio para nginx
 mkdir -p nginx/conf.d
 
 # Crear configuración principal de nginx
@@ -325,15 +336,15 @@ NGINX_CONF
 # Crear archivo .htpasswd para autenticación básica
 echo "$BASIC_AUTH_HASH" | sed 's/\$\$/\$/g' > nginx/conf.d/.htpasswd
 
-# 9. Iniciar servicios
-echo -e "${CYAN}Iniciando todos los servicios...${NC}"
+# 10. Iniciar servicios
+echo -e "${CYAN}[8/8] Iniciando todos los servicios...${NC}"
 docker compose up -d 2>&1 | tee /tmp/docker-compose-up.log
 
 sleep 60
 echo -e "${CYAN}Estamos próximos a terminar.${NC}"
 echo ""
 
-# 10. Verificar que los servicios estén corriendo
+# Verificar que los servicios estén corriendo
 echo -e "${CYAN}Verificando servicios...${NC}"
 sleep 30
 
