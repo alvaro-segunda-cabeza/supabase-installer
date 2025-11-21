@@ -16,52 +16,22 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Solicitar información al usuario PRIMERO
-# Si no se pasan argumentos, pedirlos interactivamente
-if [ -z "$1" ] || [ -z "$2" ]; then
-    echo -e "${YELLOW}Uso: $0 <dominio> <email>${NC}"
-    echo -e "${YELLOW}O ejecuta sin argumentos para modo interactivo.${NC}"
-    echo ""
-    echo -e "${YELLOW}Configuración inicial:${NC}"
-    echo ""
-    
-    # Intentar múltiples métodos para leer input
-    if [ -t 0 ]; then
-        # Si hay terminal disponible
-        echo -n "Introduce tu dominio base (ej. midominio.com): "
-        read DOMAIN
-        echo -n "Introduce tu email para Let's Encrypt: "
-        read EMAIL
-    elif [ -c /dev/tty ]; then
-        # Intentar leer desde /dev/tty
-        echo -n "Introduce tu dominio base (ej. midominio.com): "
-        read DOMAIN < /dev/tty
-        echo -n "Introduce tu email para Let's Encrypt: "
-        read EMAIL < /dev/tty
-    else
-        # Si nada funciona, dar instrucciones
-        echo -e "${RED}No se puede leer input interactivamente.${NC}"
-        echo ""
-        echo -e "${YELLOW}Por favor, ejecuta el script de esta forma:${NC}"
-        echo -e "${GREEN}bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh) midominio.com tu@email.com${NC}"
-        echo ""
-        echo -e "${YELLOW}O descarga el script y ejecútalo:${NC}"
-        echo -e "${GREEN}curl -O https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh${NC}"
-        echo -e "${GREEN}chmod +x install_supabase.sh${NC}"
-        echo -e "${GREEN}sudo ./install_supabase.sh midominio.com tu@email.com${NC}"
-        exit 1
-    fi
-else
-    # Si se pasaron argumentos, usarlos
-    DOMAIN="$1"
-    EMAIL="$2"
-fi
+# 1. Solicitar información al usuario de forma interactiva
+echo -e "${YELLOW}Configuración inicial:${NC}"
+echo ""
 
+# Leer desde /dev/tty para que funcione incluso con curl piped
+exec < /dev/tty
+
+echo -n "Introduce tu dominio base (ej. midominio.com): "
+read DOMAIN
+
+echo -n "Introduce tu email para Let's Encrypt: "
+read EMAIL
+
+# Validar que no estén vacíos
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
-    echo ""
-    echo -e "${YELLOW}Ejecuta el script así:${NC}"
-    echo -e "${GREEN}bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh) midominio.com tu@email.com${NC}"
     exit 1
 fi
 

@@ -1,23 +1,20 @@
-# Supabase Self-Hosted Installer with Traefik & SSL
+# Supabase Self-Hosted Installer with Nginx & HTTP
 
-Este repositorio contiene un script automatizado para desplegar una instancia de **Supabase** completa y lista para producción en un servidor Ubuntu/Debian, utilizando **Traefik** como proxy inverso para gestionar certificados SSL automáticamente (Let's Encrypt) y proteger el acceso.
-
-Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente.
+Este repositorio contiene un script automatizado para desplegar una instancia de **Supabase** completa en un servidor Ubuntu/Debian, utilizando **Nginx** como proxy inverso.
 
 ## Características
 
 - 🚀 **Instalación en 1 comando**: Instala Docker, Supabase y configura todo automáticamente.
-- 🔒 **SSL Automático**: Traefik gestiona los certificados Let's Encrypt.
 - 🛡️ **Seguridad**: Protege el Dashboard (Studio) con autenticación básica.
-- ☁️ **Cloudflare Ready**: Compatible con el modo proxy de Cloudflare.
 - 🐳 **Dockerizado**: Todo corre en contenedores aislados.
+- 🎯 **Simple**: Sin complicaciones de SSL, ideal para desarrollo y entornos internos.
 
 ## Requisitos
 
 - Un servidor VPS con **Ubuntu 20.04+** o **Debian 10+**.
 - Acceso **root** o usuario con `sudo`.
-- Un dominio (ej. `midominio.com`) apuntando a la IP del servidor.
-  - Necesitas registros A para `studio.midominio.com` y `api.midominio.com`.
+- Un dominio (ej. `midominio.com`) apuntando a la IP del servidor (opcional).
+  - Si usas dominio, necesitas registros A para `studio.midominio.com` y `api.midominio.com`.
 
 ## Instalación en 1 Comando
 
@@ -25,32 +22,34 @@ Diseñado para funcionar detrás de **Cloudflare (Nube Naranja)** o directamente
 bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)
 ```
 
-Durante la instalación, el script te pedirá:
-1. **Dominio**: El dominio base (ej. `midominio.com`)
-2. **Email**: Para el registro de certificados SSL de Let's Encrypt
+El script te pedirá de forma interactiva:
+1. **Dominio**: Tu dominio base (ej. `midominio.com`)
+2. **Email**: Tu email para notificaciones
 
-¡Eso es todo! El script se encarga del resto.
+¡Así de simple! El script se encarga del resto.
 
 ## Post-Instalación
 
 Al finalizar, el script te mostrará:
-- **URL del Dashboard**: `https://studio.tudominio.com`
-- **URL de la API**: `https://api.tudominio.com`
+- **URL del Dashboard**: `http://studio.tudominio.com` o `http://TU-IP`
+- **URL de la API**: `http://api.tudominio.com`
 - **Credenciales**:
   - Usuario/Pass para entrar al Dashboard (Basic Auth).
-  - Contraseña de la Base de Datos (Postgres).
+  - Anon Key y Service Role Key para tu aplicación.
+  - Contraseña de PostgreSQL.
 
-### Configuración de Cloudflare
+### Configuración de DNS (Opcional)
 
-Si usas Cloudflare, asegúrate de:
-1. Tener los registros DNS (A) con la "Nube Naranja" activada.
-2. Ir a **SSL/TLS** > **Overview** y seleccionar modo **Full** o **Full (Strict)**.
+Si usas un dominio:
+1. Agrega registro A: `studio.tudominio.com` → IP del servidor
+2. Agrega registro A: `api.tudominio.com` → IP del servidor
+3. **Importante**: Desactiva el proxy de Cloudflare (nube gris) si lo usas.
 
 ## Estructura
 
 El script instala Supabase en `/opt/supabase`.
 - `docker-compose.yml`: Configuración base de Supabase.
-- `docker-compose.override.yml`: Configuración de Traefik inyectada por el script.
+- `docker-compose.override.yml`: Configuración de Nginx.
 - `.env`: Variables de entorno y secretos.
 
 ## Gestión Post-Instalación
@@ -77,4 +76,9 @@ docker compose down
 ```bash
 cd /opt/supabase
 docker compose up -d
+```
+
+### Ver credenciales
+```bash
+cat /root/supabase_credentials.txt
 ```
