@@ -16,11 +16,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Solicitar información al usuario PRIMERO
+# 1. Solicitar información al usuario PRIMERO (usar /dev/tty para curl | bash)
 echo -e "${YELLOW}Configuración inicial:${NC}"
 echo ""
-read -p "Introduce tu dominio base (ej. midominio.com): " DOMAIN
-read -p "Introduce tu email para Let's Encrypt: " EMAIL
+echo -n "Introduce tu dominio base (ej. midominio.com): "
+read DOMAIN < /dev/tty
+echo -n "Introduce tu email para Let's Encrypt: "
+read EMAIL < /dev/tty
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     echo -e "${RED}Error: Dominio y Email son requeridos.${NC}"
@@ -29,6 +31,8 @@ fi
 
 echo ""
 echo -e "${GREEN}✓ Configuración guardada${NC}"
+echo -e "${GREEN}  Dominio: $DOMAIN${NC}"
+echo -e "${GREEN}  Email: $EMAIL${NC}"
 echo ""
 
 # 2. Actualizar sistema e instalar dependencias básicas
