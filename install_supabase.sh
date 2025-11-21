@@ -80,17 +80,70 @@ cd supabase/docker
 cp .env.example .env
 
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
-JWT_SECRET=$(openssl rand -base64 32)
-ANON_KEY=$(docker run --rm supabase/gotrue:v2.99.0 gotrue generate keys --exp 315360000 --secret "$JWT_SECRET" | grep anon | awk '{print $2}')
-SERVICE_ROLE_KEY=$(docker run --rm supabase/gotrue:v2.99.0 gotrue generate keys --exp 315360000 --secret "$JWT_SECRET" | grep service_role | awk '{print $2}')
+JWT_SECRET=$(openssl rand -base64 32 | tr -d '\n')
 
-# Si falla la generación de JWT, usar fallback
-if [ -z "$ANON_KEY" ]; then
-  ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
-fi
+# Generar JWT tokens usando Python (disponible en la mayoría de sistemas)
+ANON_KEY=$(python3 -c "
+import jwt
+import time
+secret = '$JWT_SECRET'
+payload = {
+    'iss': 'supabase',
+    'ref': 'default',
+    'role': 'anon',
+    'iat': int(time.time()),
+    'exp': int(time.time()) + 315360000
+}
+print(jwt.encode(payload, secret, algorithm='HS256'))
+" 2>/dev/null || echo "")
 
-if [ -z "$SERVICE_ROLE_KEY" ]; then
-  SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU"
+SERVICE_ROLE_KEY=$(python3 -c "
+import jwt
+import time
+secret = '$JWT_SECRET'
+payload = {
+    'iss': 'supabase',
+    'ref': 'default',
+    'role': 'service_role',
+    'iat': int(time.time()),
+    'exp': int(time.time()) + 315360000
+}
+print(jwt.encode(payload, secret, algorithm='HS256'))
+" 2>/dev/null || echo "")
+
+# Si Python no funciona, instalar PyJWT y reintentar
+if [ -z "$ANON_KEY" ] || [ -z "$SERVICE_ROLE_KEY" ]; then
+  echo "📦 Instalando PyJWT para generar tokens..."
+  apt install -y python3-pip
+  pip3 install PyJWT --break-system-packages 2>/dev/null || pip3 install PyJWT
+  
+  ANON_KEY=$(python3 -c "
+import jwt
+import time
+secret = '$JWT_SECRET'
+payload = {
+    'iss': 'supabase',
+    'ref': 'default',
+    'role': 'anon',
+    'iat': int(time.time()),
+    'exp': int(time.time()) + 315360000
+}
+print(jwt.encode(payload, secret, algorithm='HS256'))
+")
+
+  SERVICE_ROLE_KEY=$(python3 -c "
+import jwt
+import time
+secret = '$JWT_SECRET'
+payload = {
+    'iss': 'supabase',
+    'ref': 'default',
+    'role': 'service_role',
+    'iat': int(time.time()),
+    'exp': int(time.time()) + 315360000
+}
+print(jwt.encode(payload, secret, algorithm='HS256'))
+")
 fi
 
 # Actualizar variables críticas
