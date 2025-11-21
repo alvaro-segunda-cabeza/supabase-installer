@@ -6,7 +6,6 @@ EMAIL="admin@$DOMAIN"
 
 echo "==============================================="
 echo " INSTALADOR SUPABASE SELF-HOSTED (2025)        "
-echo " Compatible con repo oficial                   "
 echo "==============================================="
 
 mkdir -p /apps/traefik
@@ -52,7 +51,7 @@ EOF
 docker compose -f /apps/traefik/docker-compose.yml up -d
 
 #########################################################
-# SUPABASE (docker folder actual)
+# SUPABASE
 #########################################################
 
 cd /apps/supabase
@@ -64,7 +63,7 @@ fi
 cd source/docker
 
 #########################################################
-# ENV GENERATION (nuevo formato)
+# ENV GENERATION (mínimo necesario)
 #########################################################
 
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
@@ -76,42 +75,28 @@ SECRET_KEY_BASE=$(openssl rand -hex 48)
 POOLER_TENANT_ID="default"
 
 cat <<EOF >.env
-
-# ---------------------
-# DATABASE
-# ---------------------
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-POSTGRES_DB=postgres
-POSTGRES_PORT=5432
-
-# Pooler
-POOLER_TENANT_ID=$POOLER_TENANT_ID
-
-# JWT + API KEYS
 JWT_SECRET=$JWT_SECRET
-ANON_KEY=$ANON_KEY
 SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
-
-# INTERNAL ENCRYPTION
+ANON_KEY=$ANON_KEY
 PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY
 SECRET_KEY_BASE=$SECRET_KEY_BASE
 
-# URLS
 SUPABASE_PUBLIC_URL=https://api.$DOMAIN
 SITE_URL=https://studio.$DOMAIN
 
-# SMTP (vacío por ahora)
-SMTP_ADMIN_EMAIL=$EMAIL
+POOLER_TENANT_ID=$POOLER_TENANT_ID
+
+DOCKER_SOCKET_LOCATION=/var/run/docker.sock
 EOF
 
 #########################################################
-# TRAEFIK ROUTING (solo API + STUDIO)
+# TRAEFIK OVERRIDE
 #########################################################
 
 cat <<EOF >traefik.override.yml
 services:
 
-  # EXPOSE KONG GATEWAY
   kong:
     labels:
       - "traefik.enable=true"
@@ -122,7 +107,6 @@ services:
     networks:
       - traefik-network
 
-  # EXPOSE STUDIO
   studio:
     labels:
       - "traefik.enable=true"
@@ -132,7 +116,6 @@ services:
       - "traefik.http.services.studio.loadbalancer.server.port=3000"
     networks:
       - traefik-network
-
 EOF
 
 #########################################################
@@ -146,7 +129,7 @@ docker compose -f docker-compose.yml -f traefik.override.yml up -d
 #########################################################
 
 echo "==============================================="
-echo " SUPABASE INSTALADO CORRECTAMENTE"
+echo " SUPABASE INSTALADO "
 echo "==============================================="
 echo "Studio:       https://studio.$DOMAIN"
 echo "API Gateway:  https://api.$DOMAIN"
