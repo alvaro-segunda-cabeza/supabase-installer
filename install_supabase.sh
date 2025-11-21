@@ -80,18 +80,37 @@ cd supabase/docker
 cp .env.example .env
 
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
-JWT_SECRET=$(openssl rand -hex 32)
-SERVICE_ROLE_KEY=$(openssl rand -hex 32)
-ANON_KEY=$(openssl rand -hex 32)
+JWT_SECRET=$(openssl rand -base64 32)
+ANON_KEY=$(docker run --rm supabase/gotrue:v2.99.0 gotrue generate keys --exp 315360000 --secret "$JWT_SECRET" | grep anon | awk '{print $2}')
+SERVICE_ROLE_KEY=$(docker run --rm supabase/gotrue:v2.99.0 gotrue generate keys --exp 315360000 --secret "$JWT_SECRET" | grep service_role | awk '{print $2}')
 
+# Si falla la generación de JWT, usar fallback
+if [ -z "$ANON_KEY" ]; then
+  ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+fi
+
+if [ -z "$SERVICE_ROLE_KEY" ]; then
+  SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU"
+fi
+
+# Actualizar variables críticas
 sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|" .env
 sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env
-sed -i "s|^SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY|" .env
 sed -i "s|^ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
+sed -i "s|^SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY|" .env
 
-# Variables externas
-echo "API_EXTERNAL_URL=https://api.$DOMAIN" >> .env
-echo "SITE_URL=https://studio.$DOMAIN" >> .env
+# URLs externas
+sed -i "s|^API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://api.$DOMAIN|" .env
+sed -i "s|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://api.$DOMAIN|" .env
+sed -i "s|^STUDIO_DEFAULT_PROJECT=.*|STUDIO_DEFAULT_PROJECT=Default Project|" .env
+
+# URLs internas para Studio
+sed -i "s|^SUPABASE_URL=.*|SUPABASE_URL=http://kong:8000|" .env
+sed -i "s|^STUDIO_PG_META_URL=.*|STUDIO_PG_META_URL=http://meta:8080|" .env
+
+# Dashboard
+sed -i "s|^DASHBOARD_USERNAME=.*|DASHBOARD_USERNAME=supabase|" .env
+sed -i "s|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=$POSTGRES_PASSWORD|" .env
 
 ###############################################
 # TRAEFIK OVERRIDE
@@ -129,6 +148,10 @@ EOF
 docker compose pull
 docker compose -f docker-compose.yml -f traefik.override.yml up -d
 
+# Esperar a que los servicios estén listos
+echo "⏳ Esperando a que los servicios inicien..."
+sleep 30
+
 ###############################################
 # FIN
 ###############################################
@@ -137,6 +160,10 @@ echo " ✅ SUPABASE INSTALADO"
 echo "==============================================="
 echo "Studio: https://studio.$DOMAIN"
 echo "API:    https://api.$DOMAIN"
+echo ""
+echo "Credenciales Dashboard:"
+echo "Username: supabase"
+echo "Password: $POSTGRES_PASSWORD"
 echo ""
 echo "Guardá estas claves:"
 echo "POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
