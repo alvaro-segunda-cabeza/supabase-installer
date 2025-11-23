@@ -1,84 +1,258 @@
-# Supabase Self-Hosted Installer with Nginx & HTTP
+# Supabase Self-Hosted Installer
 
-Este repositorio contiene un script automatizado para desplegar una instancia de **Supabase** completa en un servidor Ubuntu/Debian, utilizando **Nginx** como proxy inverso.
+![Supabase](https://img.shields.io/badge/Supabase-Self--Hosted-3ECF8E?style=for-the-badge&logo=supabase)
+![Docker](https://img.shields.io/badge/Docker-Required-2496ED?style=for-the-badge&logo=docker)
+![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 
-## Características
+**Instalador automatizado de Supabase completo** - Despliega tu propia instancia de Supabase (como supabase.com) en un solo comando.
 
-- 🚀 **Instalación en 1 comando**: Instala Docker, Supabase y configura todo automáticamente.
-- 🛡️ **Seguridad**: Protege el Dashboard (Studio) con autenticación básica.
-- 🐳 **Dockerizado**: Todo corre en contenedores aislados.
-- 🎯 **Simple**: Sin complicaciones de SSL, ideal para desarrollo y entornos internos.
+---
 
-## Requisitos
+## 🚀 Características
 
-- Un servidor VPS con **Ubuntu 20.04+** o **Debian 10+**.
-- Acceso **root** o usuario con `sudo`.
-- Un dominio (ej. `midominio.com`) apuntando a la IP del servidor (opcional).
-  - Si usas dominio, necesitas registros A para `studio.midominio.com` y `api.midominio.com`.
+✅ **Instalación con 1 comando** - Todo automatizado, sin configuración manual  
+✅ **Supabase completo** - Todos los servicios: Auth, Database, Storage, Realtime, Edge Functions  
+✅ **SSL automático** - Certificados Let's Encrypt con renovación automática  
+✅ **Modo sin dominio** - También funciona con IP directa (ideal para desarrollo)  
+✅ **Instalador Docker incluido** - Si no tienes Docker, se instala automáticamente  
+✅ **Seguro** - Genera claves aleatorias y credenciales únicas  
+✅ **Interactivo** - Te guía paso a paso durante la instalación  
 
-## Instalación en 1 Comando
+---
+
+## 📋 Requisitos
+
+- **Sistema Operativo**: Ubuntu 20.04+ o Debian 10+
+- **Acceso**: Usuario con privilegios `sudo` o `root`
+- **Recursos mínimos**: 2GB RAM, 2 CPU cores, 20GB disco
+- **Opcional**: Un dominio apuntando al servidor (para SSL)
+
+---
+
+## ⚡ Instalación Rápida
+
+### Opción 1: Descarga directa
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/alvaro-segunda-cabeza/supabase-installer/main/install_supabase.sh)
+# Descargar el instalador
+curl -O https://raw.githubusercontent.com/TU-USUARIO/supabase-installer/main/install_supabase.sh
+
+# Ejecutar
+sudo bash install_supabase.sh
 ```
 
-El script te pedirá de forma interactiva:
-1. **Dominio**: Tu dominio base (ej. `midominio.com`)
-2. **Email**: Tu email para notificaciones
+### Opción 2: Clonar repositorio
 
-¡Así de simple! El script se encarga del resto.
-
-## Post-Instalación
-
-Al finalizar, el script te mostrará:
-- **URL del Dashboard**: `http://studio.tudominio.com` o `http://TU-IP`
-- **URL de la API**: `http://api.tudominio.com`
-- **Credenciales**:
-  - Usuario/Pass para entrar al Dashboard (Basic Auth).
-  - Anon Key y Service Role Key para tu aplicación.
-  - Contraseña de PostgreSQL.
-
-### Configuración de DNS (Opcional)
-
-Si usas un dominio:
-1. Agrega registro A: `studio.tudominio.com` → IP del servidor
-2. Agrega registro A: `api.tudominio.com` → IP del servidor
-3. **Importante**: Desactiva el proxy de Cloudflare (nube gris) si lo usas.
-
-## Estructura
-
-El script instala Supabase en `/opt/supabase`.
-- `docker-compose.yml`: Configuración base de Supabase.
-- `docker-compose.override.yml`: Configuración de Nginx.
-- `.env`: Variables de entorno y secretos.
-
-## Gestión Post-Instalación
-
-### Ver logs
 ```bash
-cd /opt/supabase
+git clone https://github.com/TU-USUARIO/supabase-installer.git
+cd supabase-installer
+sudo bash install_supabase.sh
+```
+
+---
+
+## 🎯 ¿Qué hace el instalador?
+
+El script realiza automáticamente:
+
+1. ✅ Verifica e instala Docker (si no está presente)
+2. ✅ Te pregunta si quieres usar dominio o IP
+3. ✅ Instala todas las dependencias necesarias
+4. ✅ Descarga Supabase oficial desde GitHub
+5. ✅ Genera claves de seguridad aleatorias
+6. ✅ Configura variables de entorno
+7. ✅ Instala Traefik para SSL (si usas dominio)
+8. ✅ Inicia todos los servicios de Supabase
+9. ✅ Guarda tus credenciales de forma segura
+
+---
+
+## 🌐 Dos modos de instalación
+
+### Modo 1: Con Dominio (SSL Automático) 🔒
+
+**Ideal para producción**
+
+```
+Studio: https://studio.tudominio.com
+API:    https://api.tudominio.com
+```
+
+**Requisitos DNS previos:**
+- Crear registro `A` para `studio.tudominio.com` → IP del servidor
+- Crear registro `A` para `api.tudominio.com` → IP del servidor
+
+El instalador generará certificados SSL automáticamente con Let's Encrypt.
+
+### Modo 2: Con IP (Sin SSL) 🔓
+
+**Ideal para desarrollo o redes internas**
+
+```
+Studio: http://123.45.67.89:3000
+API:    http://123.45.67.89:8000
+```
+
+No necesitas dominio ni configurar DNS.
+
+---
+
+## 📱 Después de la instalación
+
+### Acceder al Dashboard
+
+El instalador te mostrará:
+- 🌐 **URL del Studio** (dashboard web)
+- 🔑 **Usuario y contraseña** para acceder
+- 📦 **Claves de API** para conectar tu aplicación
+
+Las credenciales completas se guardan en: `/root/supabase_credentials.txt`
+
+### Conectar tu aplicación
+
+Usa las credenciales proporcionadas en tu aplicación:
+
+```javascript
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = 'https://api.tudominio.com'  // o tu IP
+const supabaseAnonKey = 'tu-anon-key'
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
+```
+
+---
+
+## 🛠️ Comandos útiles
+
+### Ver credenciales guardadas
+```bash
+cat /root/supabase_credentials.txt
+```
+
+### Ver logs en tiempo real
+```bash
+cd /opt/supabase/supabase/docker
 docker compose logs -f
+```
+
+### Ver estado de los servicios
+```bash
+cd /opt/supabase/supabase/docker
+docker compose ps
 ```
 
 ### Reiniciar servicios
 ```bash
-cd /opt/supabase
+cd /opt/supabase/supabase/docker
 docker compose restart
 ```
 
 ### Detener servicios
 ```bash
-cd /opt/supabase
+cd /opt/supabase/supabase/docker
 docker compose down
 ```
 
 ### Iniciar servicios
 ```bash
-cd /opt/supabase
+cd /opt/supabase/supabase/docker
 docker compose up -d
 ```
 
-### Ver credenciales
+---
+
+## 🔧 Solución de problemas
+
+### Los servicios no inician
 ```bash
-cat /root/supabase_credentials.txt
+# Ver logs de todos los servicios
+cd /opt/supabase/supabase/docker
+docker compose logs
+
+# Verificar que Docker está corriendo
+systemctl status docker
 ```
+
+### Error de certificados SSL
+- Verifica que el DNS esté correctamente configurado
+- Los certificados pueden tardar 1-2 minutos en generarse
+- Revisa los logs de Traefik: `docker logs supabase-traefik`
+
+### No puedo acceder al Studio
+- Verifica que los puertos 80, 443 (o 3000, 8000) estén abiertos en el firewall
+- Si usas un proveedor cloud, revisa los security groups
+- Verifica que los servicios estén corriendo: `docker compose ps`
+
+### Reinstalar desde cero
+```bash
+# Detener y eliminar todo
+cd /opt/supabase/supabase/docker
+docker compose down -v
+
+# Eliminar directorio
+rm -rf /opt/supabase
+
+# Volver a ejecutar el instalador
+sudo bash install_supabase.sh
+```
+
+---
+
+## 📚 Servicios incluidos
+
+El instalador configura todos estos servicios:
+
+- **Kong** - API Gateway
+- **PostgreSQL** - Base de datos
+- **GoTrue** - Servicio de autenticación
+- **PostgREST** - API REST automática
+- **Realtime** - Suscripciones en tiempo real
+- **Storage** - Almacenamiento de archivos
+- **imgproxy** - Optimización de imágenes
+- **pg_meta** - API de metadata de PostgreSQL
+- **Studio** - Dashboard web
+- **Edge Functions** - Funciones serverless
+- **Traefik** - Proxy inverso con SSL (opcional)
+
+---
+
+## 🔐 Seguridad
+
+- ✅ Todas las contraseñas se generan aleatoriamente
+- ✅ JWT secrets únicos por instalación
+- ✅ Certificados SSL automáticos con Let's Encrypt
+- ✅ Credenciales guardadas con permisos 600 (solo root)
+- ✅ Firewall UFW configurado automáticamente
+
+**Recomendaciones adicionales:**
+- Cambia la contraseña del dashboard después de la instalación
+- Usa claves SSH para acceder al servidor
+- Mantén Docker actualizado
+- Haz backups regulares de `/opt/supabase/supabase/docker/volumes`
+
+---
+
+## 🆘 Soporte
+
+¿Problemas o preguntas?
+- 📝 Abre un [Issue](https://github.com/TU-USUARIO/supabase-installer/issues)
+- 📖 Consulta la [documentación oficial de Supabase](https://supabase.com/docs)
+
+---
+
+## 📄 Licencia
+
+MIT License - Usa libremente este instalador
+
+---
+
+## 🙏 Créditos
+
+- [Supabase](https://supabase.com) - El increíble proyecto open source
+- [Docker](https://docker.com) - Containerización
+- [Traefik](https://traefik.io) - Proxy inverso
+
+---
+
+**¿Te fue útil?** Dale una ⭐ al repositorio
